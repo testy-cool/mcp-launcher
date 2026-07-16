@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 - 2026-07-16
+
+- Let `make doctor` pass when either Claude Code or Codex CLI is installed.
+
 ## 0.1.0 - 2026-07-16
 
 - Add interactive MCP selection for Claude Code and Codex CLI.
