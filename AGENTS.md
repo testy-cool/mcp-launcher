@@ -10,7 +10,7 @@ Keep the project a small Python 3.11+ standard-library program with POSIX shell 
 
 ## Repository Map
 
-- `mcp_launcher.py`: executable entry point, discovery, selection UI, preference state, Claude state updates, and Codex launch overrides.
+- `mcp_launcher.py`: executable entry point, discovery, selection UI, default and per-folder state, Claude state updates, and Codex launch overrides.
 - `install.sh`: copies the launcher to `<prefix>/lib/mcp-launcher/`, creates `<prefix>/bin/mcp-launcher`, and replaces one marked block in the selected shell RC file.
 - `uninstall.sh`: removes only launcher-owned installation artifacts and the marked shell block; preferences survive unless `--purge` is supplied.
 - `tests/test_mcp_launcher.py`: unit coverage for argument parsing, discovery, selection, ordering, and state mutation.
@@ -25,7 +25,7 @@ Keep the project a small Python 3.11+ standard-library program with POSIX shell 
 2. The launcher resolves the real binary from `PATH`, with `MCP_LAUNCHER_REAL_CLAUDE` and `MCP_LAUNCHER_REAL_CODEX` as explicit overrides. It must reject resolution back to itself.
 3. Claude MCPs are discovered from `~/.claude.json` plus `.mcp.json` files from the current directory through its ancestors. The selection is applied through Claude's project-scoped disabled-server lists, including `.claude/settings.local.json` for `.mcp.json` servers.
 4. Codex MCPs are discovered with `codex mcp list --json` and ordered using `~/.codex/config.toml` when available. Selection is passed only to the launched process through `-c mcp_servers.<name>...` overrides.
-5. Picker preferences and remembered Codex selections live in `~/.config/mcp-launcher/state.json`, written atomically with mode `0600`.
+5. Picker preferences, per-tool defaults, and remembered selections for both clients live in `~/.config/mcp-launcher/state.json`, written atomically with mode `0600`.
 
 The launcher may cache MCP names, selections, and preference order. It must never copy MCP definitions, OAuth data, credentials, headers, or secrets into its state or process arguments.
 

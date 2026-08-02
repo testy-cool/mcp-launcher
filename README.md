@@ -54,7 +54,7 @@ claude
 codex --yolo
 ```
 
-Press Space to enable or disable an MCP, then Enter to launch. The picker remembers selections and always displays MCPs in your saved preference order.
+Press Space to enable or disable an MCP, then Enter to launch. The launcher remembers that selection for the exact folder you launched from and always displays MCPs in your saved preference order. A folder without a remembered selection starts from the tool's default when one has been set.
 
 Launcher-only controls are removed before the real CLI receives its arguments:
 
@@ -62,7 +62,10 @@ Launcher-only controls are removed before the real CLI receives its arguments:
 claude --mcp-order       # set the preferred MCP order
 codex --mcp-order
 
-claude --mcp-last        # reuse the current selection without a picker
+claude --mcp-default     # pick the default for new folders, then exit
+codex --mcp-default
+
+claude --mcp-last        # reuse this folder's selection, or the default
 claude --mcp-none        # launch with no discovered MCPs
 claude --mcp-all         # launch with every discovered MCP
 claude --mcp-refresh     # refresh Claude.ai-managed connectors
@@ -78,10 +81,11 @@ MCP_LAUNCHER_SELECT=deepwiki,backlog claude --version
 
 ## How selection works
 
-- Claude uses its native per-project `disabledMcpServers` and `disabledMcpjsonServers` state. Claude.ai connectors remain available in the picker, and running sessions are not modified.
+- Both tools remember selected MCP names by exact resolved working directory. A remembered folder selection takes precedence over the tool default; without either, the launcher's previous native/current behavior is preserved.
+- Claude also applies the choice through its native per-project `disabledMcpServers` and `disabledMcpjsonServers` state. Claude.ai connectors remain available in the picker, and running sessions are not modified.
 - Codex receives launch-scoped `mcp_servers.<name>.enabled` overrides. Plugin-contributed MCPs are supported without disabling the rest of their plugin.
 - MCP definitions, OAuth data, headers, and credentials are never copied into the launcher state.
-- Preferences live in `~/.config/mcp-launcher/state.json` with mode `0600`.
+- Defaults, per-folder selections, and picker preferences live in `~/.config/mcp-launcher/state.json` with mode `0600`.
 
 ## Update or uninstall
 
@@ -124,4 +128,4 @@ make doctor   # verify Python, Claude, Codex, and optional gum
 make dry-run  # preview installation
 ```
 
-The install smoke test uses a temporary HOME and fake Claude/Codex binaries. It verifies dry-run safety, PATH-based binary discovery, idempotent installation, argument passthrough, clean uninstall, and preference preservation.
+The install smoke test uses a temporary HOME and fake Claude/Codex binaries. It verifies dry-run safety, PATH-based binary discovery, idempotent installation, argument passthrough, default and per-folder selection precedence, clean uninstall, and preference preservation.

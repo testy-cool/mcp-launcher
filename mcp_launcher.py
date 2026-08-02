@@ -81,6 +81,7 @@ def parse_wrapper_args(args: list[str]) -> tuple[Control, list[str]]:
         "--mcp-all": "all",
         "--mcp-none": "none",
         "--mcp-last": "last",
+        "--mcp-default": "default",
         "--mcp-order": "order",
         "--mcp-help": "help",
     }
@@ -185,7 +186,8 @@ def load_state(path: Path = STATE_PATH) -> dict:
         "version": STATE_VERSION,
         "preference": {"claude": [], "codex": []},
         "catalog": {"claude": []},
-        "selections": {"codex": {}},
+        "defaults": {},
+        "selections": {"claude": {}, "codex": {}},
     }
     if not path.exists():
         return default
@@ -196,11 +198,57 @@ def load_state(path: Path = STATE_PATH) -> dict:
         raise LauncherError(f"Unsupported launcher state version in {path}")
     for key, value in default.items():
         data.setdefault(key, value)
+    selections = data.get("selections")
+    if not isinstance(selections, dict):
+        raise LauncherError(f"Launcher selections must be a JSON object: {path}")
+    selections.setdefault("claude", {})
+    selections.setdefault("codex", {})
     return data
 
 
 def save_state(state: dict, path: Path = STATE_PATH) -> None:
     write_json_atomic(path, state, mode=0o600)
+
+
+def selection_for_folder(
+    state: dict,
+    tool: str,
+    cwd_key: str,
+    ordered: list[str],
+    fallback: set[str],
+) -> set[str]:
+    available = set(ordered)
+    selections = state.get("selections", {})
+    tool_selections = selections.get(tool, {}) if isinstance(selections, dict) else {}
+    saved = tool_selections.get(cwd_key) if isinstance(tool_selections, dict) else None
+    if isinstance(saved, list):
+        return set(saved) & available
+    default = state.get("defaults", {}).get(tool)
+    if isinstance(default, list):
+        return set(default) & available
+    return fallback & available
+
+
+def remember_folder_selection(
+    state: dict,
+    tool: str,
+    cwd_key: str,
+    ordered: list[str],
+    selected: set[str],
+) -> None:
+    tool_selections = state.setdefault("selections", {}).setdefault(tool, {})
+    tool_selections[cwd_key] = [name for name in ordered if name in selected]
+
+
+def remember_default_selection(
+    state: dict,
+    tool: str,
+    ordered: list[str],
+    selected: set[str],
+) -> None:
+    state.setdefault("defaults", {})[tool] = [
+        name for name in ordered if name in selected
+    ]
 
 
 def mapping_names(value: object) -> list[str]:
@@ -581,10 +629,13 @@ def choose_selection(
         return set()
     if control.mode == "last":
         return current
+    label = f"{tool} default" if control.mode == "default" else tool
     result = gum_choose(
         ordered,
         current,
-        f"{tool}: Space toggles MCPs · Enter launches · sorted by saved preference",
+        f"{label}: Space toggles MCPs · Enter saves · sorted by saved preference"
+        if control.mode == "default"
+        else f"{label}: Space toggles MCPs · Enter launches · sorted by saved preference",
     )
     if result is None:
         print(f"mcp-launcher: no TTY; reusing last {tool} selection", file=sys.stderr)
@@ -614,12 +665,14 @@ def show_help() -> None:
         """MCP launcher controls (removed before invoking Claude/Codex):
   --mcp-all       enable every discovered MCP without opening the picker
   --mcp-none      disable every discovered MCP without opening the picker
-  --mcp-last      reuse the previous/current selection without opening the picker
+  --mcp-last      reuse the folder/default selection without opening the picker
+  --mcp-default   set the selection used for new folders, then exit
   --mcp-order     set persistent picker/preference order, then exit
   --mcp-refresh   refresh Claude.ai-managed connector discovery before picking
   --mcp-help      show this help
 
-Normal invocations open the picker. All other arguments are forwarded unchanged.
+Normal invocations open the picker and remember the chosen selection per folder.
+All other arguments are forwarded unchanged.
 For automation, MCP_LAUNCHER_SELECT accepts all, none, or comma-separated names.
 """
     )
@@ -648,9 +701,23 @@ def run_claude(control: Control, passthrough: list[str], state: dict) -> None:
         update_preference("claude", ordered, state)
         return
 
-    current = claude_current_selection(home, inventory)
+    cwd_key = inventory.project_key
+    current = selection_for_folder(
+        state,
+        tool="claude",
+        cwd_key=cwd_key,
+        ordered=ordered,
+        fallback=claude_current_selection(home, inventory),
+    )
     selected = choose_selection(control, ordered, current, "claude")
+    if control.mode == "default":
+        remember_default_selection(state, "claude", ordered, selected)
+        save_state(state)
+        report_selection("claude default", ordered, selected)
+        return
     apply_claude_selection(home, inventory, ordered, selected)
+    remember_folder_selection(state, "claude", cwd_key, ordered, selected)
+    save_state(state)
     report_selection("claude", ordered, selected)
     os.execvpe(str(binary), [str(binary), *passthrough], os.environ)
 
@@ -662,8 +729,13 @@ def run_codex(control: Control, passthrough: list[str], state: dict) -> None:
     ordered = merge_preference(saved_preference, inventory.names)
     state["preference"]["codex"] = retain_preference(saved_preference, inventory.names)
     cwd_key = str(Path.cwd().resolve())
-    saved = state["selections"].setdefault("codex", {}).get(cwd_key)
-    current = set(saved) & set(ordered) if isinstance(saved, list) else inventory.enabled
+    current = selection_for_folder(
+        state,
+        tool="codex",
+        cwd_key=cwd_key,
+        ordered=ordered,
+        fallback=inventory.enabled,
+    )
     save_state(state)
 
     if control.mode == "order":
@@ -671,7 +743,12 @@ def run_codex(control: Control, passthrough: list[str], state: dict) -> None:
         return
 
     selected = choose_selection(control, ordered, current, "codex")
-    state["selections"]["codex"][cwd_key] = [name for name in ordered if name in selected]
+    if control.mode == "default":
+        remember_default_selection(state, "codex", ordered, selected)
+        save_state(state)
+        report_selection("codex default", ordered, selected)
+        return
+    remember_folder_selection(state, "codex", cwd_key, ordered, selected)
     save_state(state)
     report_selection("codex", ordered, selected)
     overrides = codex_override_args(ordered, selected, inventory.standalone_transports)

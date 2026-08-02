@@ -1,8 +1,10 @@
+import io
 import json
 import stat
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 
@@ -15,11 +17,115 @@ from mcp_launcher import (  # noqa: E402
     claude_current_selection,
     codex_override_args,
     discover_claude,
+    load_state,
     managed_claude_names,
     merge_preference,
     parse_wrapper_args,
+    remember_default_selection,
+    remember_folder_selection,
     retain_preference,
+    selection_for_folder,
+    show_help,
 )
+
+
+class StateTests(unittest.TestCase):
+    def test_new_state_has_defaults_and_folder_selections_for_both_tools(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state = load_state(Path(temp_dir) / "state.json")
+
+        self.assertEqual(state.get("defaults"), {})
+        self.assertEqual(state.get("selections"), {"claude": {}, "codex": {}})
+
+    def test_existing_state_gains_claude_folder_storage_without_losing_codex(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "state.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "preference": {"claude": [], "codex": []},
+                        "catalog": {"claude": []},
+                        "selections": {"codex": {"/work/old": ["deepwiki"]}},
+                    }
+                )
+            )
+
+            state = load_state(state_path)
+
+        self.assertEqual(state["selections"].get("claude"), {})
+        self.assertEqual(state["selections"]["codex"]["/work/old"], ["deepwiki"])
+
+    def test_new_folder_starts_from_the_tool_default(self):
+        state = {
+            "defaults": {"codex": ["backlog", "unavailable"]},
+            "selections": {"claude": {}, "codex": {}},
+        }
+
+        selected = selection_for_folder(
+            state,
+            tool="codex",
+            cwd_key="/work/new",
+            ordered=["deepwiki", "backlog"],
+            fallback={"deepwiki"},
+        )
+
+        self.assertEqual(selected, {"backlog"})
+
+    def test_remembered_folder_selection_overrides_the_tool_default(self):
+        state = {
+            "defaults": {"claude": ["backlog"]},
+            "selections": {
+                "claude": {"/work/project": ["deepwiki", "unavailable"]},
+                "codex": {},
+            },
+        }
+
+        selected = selection_for_folder(
+            state,
+            tool="claude",
+            cwd_key="/work/project",
+            ordered=["deepwiki", "backlog"],
+            fallback={"backlog"},
+        )
+
+        self.assertEqual(selected, {"deepwiki"})
+
+    def test_remembers_selection_under_the_exact_folder(self):
+        state = {
+            "defaults": {},
+            "selections": {
+                "claude": {},
+                "codex": {"/work/other": ["backlog"]},
+            },
+        }
+
+        remember_folder_selection(
+            state,
+            tool="codex",
+            cwd_key="/work/project",
+            ordered=["backlog", "deepwiki"],
+            selected={"deepwiki"},
+        )
+
+        self.assertEqual(state["selections"]["codex"]["/work/project"], ["deepwiki"])
+        self.assertEqual(state["selections"]["codex"]["/work/other"], ["backlog"])
+
+    def test_remembers_an_empty_default_as_an_explicit_choice(self):
+        state = {
+            "defaults": {"claude": ["deepwiki"]},
+            "selections": {"claude": {}, "codex": {}},
+        }
+
+        remember_default_selection(
+            state,
+            tool="claude",
+            ordered=["deepwiki", "backlog"],
+            selected=set(),
+        )
+
+        self.assertIn("claude", state["defaults"])
+        self.assertEqual(state["defaults"]["claude"], [])
 
 
 class PreferenceTests(unittest.TestCase):
@@ -99,6 +205,24 @@ class WrapperArgumentTests(unittest.TestCase):
         self.assertEqual(control.mode, "prompt")
         self.assertTrue(control.refresh)
         self.assertEqual(passthrough, ["resume", "--last"])
+
+    def test_default_control_is_removed_before_launch_arguments(self):
+        control, passthrough = parse_wrapper_args(
+            ["--mcp-default", "--dangerously-skip-permissions"]
+        )
+
+        self.assertEqual(control.mode, "default")
+        self.assertEqual(passthrough, ["--dangerously-skip-permissions"])
+
+    def test_help_explains_default_and_folder_memory(self):
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            show_help()
+
+        self.assertIn("--mcp-default", output.getvalue())
+        self.assertIn("new folders", output.getvalue())
+        self.assertIn("per folder", output.getvalue())
 
 
 class CodexTests(unittest.TestCase):

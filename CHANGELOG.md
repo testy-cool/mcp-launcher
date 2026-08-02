@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add per-tool MCP defaults for folders without a saved selection.
+- Remember selections by exact working directory for both Claude Code and Codex CLI.
+
 ## 0.1.1 - 2026-07-16
 
 - Let `make doctor` pass when either Claude Code or Codex CLI is installed.

@@ -21,6 +21,10 @@ EOF
 
 cat > "$fake_bin/codex" <<'EOF'
 #!/bin/sh
+if [ "$#" -eq 3 ] && [ "$1" = mcp ] && [ "$2" = list ] && [ "$3" = --json ]; then
+  printf '%s\n' '[{"name":"deepwiki","enabled":true},{"name":"backlog","enabled":true}]'
+  exit 0
+fi
 printf 'fake-codex:%s\n' "$*"
 EOF
 chmod +x "$fake_bin/claude" "$fake_bin/codex"
@@ -43,6 +47,39 @@ grep -q '^export KEEP_ME=yes$' "$shell_rc"
 HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" MCP_LAUNCHER_SELECT=none \
   "$prefix/bin/mcp-launcher" claude --version > "$tmp_dir/launch.log"
 grep -q '^fake-claude:--version$' "$tmp_dir/launch.log"
+
+# Defaults seed unseen folders, while an exact folder keeps the selection it was given.
+mkdir -p "$tmp_dir/project-a" "$tmp_dir/project-b"
+(cd "$tmp_dir/project-a" && \
+  HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" MCP_LAUNCHER_SELECT=deepwiki \
+    "$prefix/bin/mcp-launcher" codex --version > "$tmp_dir/project-a-first.log")
+grep -q 'mcp_servers.deepwiki.enabled=true' "$tmp_dir/project-a-first.log"
+grep -q 'mcp_servers.backlog.enabled=false' "$tmp_dir/project-a-first.log"
+
+HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" MCP_LAUNCHER_SELECT=backlog \
+  "$prefix/bin/mcp-launcher" codex --mcp-default > "$tmp_dir/default.log"
+! grep -q '^fake-codex:' "$tmp_dir/default.log"
+
+(cd "$tmp_dir/project-b" && \
+  HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \
+    "$prefix/bin/mcp-launcher" codex --mcp-last --version > "$tmp_dir/project-b.log")
+grep -q 'mcp_servers.deepwiki.enabled=false' "$tmp_dir/project-b.log"
+grep -q 'mcp_servers.backlog.enabled=true' "$tmp_dir/project-b.log"
+
+(cd "$tmp_dir/project-a" && \
+  HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \
+    "$prefix/bin/mcp-launcher" codex --mcp-last --version > "$tmp_dir/project-a-last.log")
+grep -q 'mcp_servers.deepwiki.enabled=true' "$tmp_dir/project-a-last.log"
+grep -q 'mcp_servers.backlog.enabled=false' "$tmp_dir/project-a-last.log"
+
+python3 - "$home_dir/.config/mcp-launcher/state.json" "$tmp_dir/project-a" <<'PY'
+import json
+import sys
+
+state = json.load(open(sys.argv[1]))
+assert state["defaults"]["codex"] == ["backlog"]
+assert state["selections"]["codex"][sys.argv[2]] == ["deepwiki"]
+PY
 
 # Installation is idempotent and never duplicates the shell block.
 HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \
