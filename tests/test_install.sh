@@ -44,8 +44,9 @@ test "$(readlink "$prefix/bin/mcp-launcher")" = "$prefix/lib/mcp-launcher/mcp_la
 test "$(grep -c '^# >>> mcp-launcher >>>$' "$shell_rc")" = 1
 grep -q '^export KEEP_ME=yes$' "$shell_rc"
 
-HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" MCP_LAUNCHER_SELECT=none \
-  "$prefix/bin/mcp-launcher" claude --version > "$tmp_dir/launch.log"
+(cd "$tmp_dir" && \
+  HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" MCP_LAUNCHER_SELECT=none \
+    "$prefix/bin/mcp-launcher" claude --version > "$tmp_dir/launch.log")
 grep -q '^fake-claude:--version$' "$tmp_dir/launch.log"
 
 # Defaults seed unseen folders, while an exact folder keeps the selection it was given.
@@ -60,15 +61,13 @@ HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" MCP_LAUNCHER_SELECT=backlog \
   "$prefix/bin/mcp-launcher" codex --mcp-default > "$tmp_dir/default.log"
 ! grep -q '^fake-codex:' "$tmp_dir/default.log"
 
-if HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \
-  "$prefix/bin/mcp-launcher" claude --mcp-use-default --version \
-    > "$tmp_dir/missing-default.log" 2> "$tmp_dir/missing-default.err"; then
-  echo 'use-default unexpectedly launched without a configured default' >&2
-  exit 1
-fi
-grep -q 'no claude MCP default is configured' "$tmp_dir/missing-default.err"
-grep -q 'claude --mcp-default' "$tmp_dir/missing-default.err"
-! grep -q '^fake-claude:' "$tmp_dir/missing-default.log"
+(cd "$tmp_dir" && \
+  HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \
+    "$prefix/bin/mcp-launcher" claude --mcp-use-default --version \
+      > "$tmp_dir/missing-default.log" 2> "$tmp_dir/missing-default.err")
+grep -q '^fake-claude:--version$' "$tmp_dir/missing-default.log"
+grep -q '^claude MCPs (0/' "$tmp_dir/missing-default.err"
+! grep -q 'no claude MCP default is configured' "$tmp_dir/missing-default.err"
 
 (cd "$tmp_dir/project-b" && \
   HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \

@@ -4,7 +4,7 @@
 
 - Add per-tool MCP defaults for folders without a saved selection.
 - Remember selections by exact working directory for both Claude Code and Codex CLI.
-- Add `--mcp-use-default` to launch directly with a saved default without opening the picker.
+- Add `--mcp-use-default` to launch directly with a saved default without opening the picker, falling back to all MCPs disabled when unset.
 
 ## 0.1.1 - 2026-07-16
 

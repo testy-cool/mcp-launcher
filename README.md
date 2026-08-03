@@ -85,7 +85,7 @@ MCP_LAUNCHER_SELECT=deepwiki,backlog claude --version
 ## How selection works
 
 - Both tools remember selected MCP names by exact resolved working directory. A remembered folder selection takes precedence over the tool default; without either, the launcher's previous native/current behavior is preserved.
-- `--mcp-use-default` bypasses the picker and any remembered folder choice, launches with the saved tool default, and remembers that choice for the folder. It reports an error if no default has been configured.
+- `--mcp-use-default` bypasses the picker and any remembered folder choice, launches with the saved tool default, and remembers that choice for the folder. If no default has been configured, it launches with every discovered MCP disabled.
 - Claude also applies the choice through its native per-project `disabledMcpServers` and `disabledMcpjsonServers` state. Claude.ai connectors remain available in the picker, and running sessions are not modified.
 - Codex receives launch-scoped `mcp_servers.<name>.enabled` overrides. Plugin-contributed MCPs are supported without disabling the rest of their plugin.
 - MCP definitions, OAuth data, headers, and credentials are never copied into the launcher state.

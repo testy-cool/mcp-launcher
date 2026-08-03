@@ -234,9 +234,7 @@ def configured_default_selection(state: dict, tool: str, ordered: list[str]) -> 
     defaults = state.get("defaults", {})
     default = defaults.get(tool) if isinstance(defaults, dict) else None
     if not isinstance(default, list):
-        raise LauncherError(
-            f"no {tool} MCP default is configured; run {tool} --mcp-default first"
-        )
+        return set()
     return set(default) & set(ordered)
 
 
@@ -679,7 +677,8 @@ def show_help() -> None:
   --mcp-last      reuse the folder/default selection without opening the picker
   --mcp-default   set the selection used for new folders, then exit
   --mcp-use-default
-                   launch with the saved default without opening the picker
+                   launch with the saved default without opening the picker;
+                   an unset default means all MCPs disabled
   --mcp-order     set persistent picker/preference order, then exit
   --mcp-refresh   refresh Claude.ai-managed connector discovery before picking
   --mcp-help      show this help

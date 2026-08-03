@@ -12,10 +12,12 @@ LIB_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(LIB_DIR))
 
 from mcp_launcher import (  # noqa: E402
+    LauncherError,
     apply_claude_selection,
     build_gum_command,
     claude_current_selection,
     codex_override_args,
+    configured_default_selection,
     discover_claude,
     load_state,
     managed_claude_names,
@@ -127,6 +129,18 @@ class StateTests(unittest.TestCase):
         self.assertIn("claude", state["defaults"])
         self.assertEqual(state["defaults"]["claude"], [])
 
+    def test_missing_default_means_every_mcp_is_disabled(self):
+        try:
+            selected = configured_default_selection(
+                {"defaults": {}},
+                tool="claude",
+                ordered=["deepwiki", "backlog"],
+            )
+        except LauncherError as exc:
+            self.fail(f"missing default should select none, not fail: {exc}")
+
+        self.assertEqual(selected, set())
+
 
 class PreferenceTests(unittest.TestCase):
     def test_preserves_saved_preference_and_appends_new_servers(self):
@@ -231,6 +245,7 @@ class WrapperArgumentTests(unittest.TestCase):
         self.assertIn("--mcp-default", output.getvalue())
         self.assertIn("--mcp-use-default", output.getvalue())
         self.assertIn("without opening the picker", output.getvalue())
+        self.assertIn("all MCPs disabled", output.getvalue())
         self.assertIn("new folders", output.getvalue())
         self.assertIn("per folder", output.getvalue())
 
