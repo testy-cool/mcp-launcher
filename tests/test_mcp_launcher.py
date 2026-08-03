@@ -214,6 +214,14 @@ class WrapperArgumentTests(unittest.TestCase):
         self.assertEqual(control.mode, "default")
         self.assertEqual(passthrough, ["--dangerously-skip-permissions"])
 
+    def test_use_default_control_is_removed_before_launch_arguments(self):
+        control, passthrough = parse_wrapper_args(
+            ["--mcp-use-default", "resume", "--last"]
+        )
+
+        self.assertEqual(control.mode, "use_default")
+        self.assertEqual(passthrough, ["resume", "--last"])
+
     def test_help_explains_default_and_folder_memory(self):
         output = io.StringIO()
 
@@ -221,6 +229,8 @@ class WrapperArgumentTests(unittest.TestCase):
             show_help()
 
         self.assertIn("--mcp-default", output.getvalue())
+        self.assertIn("--mcp-use-default", output.getvalue())
+        self.assertIn("without opening the picker", output.getvalue())
         self.assertIn("new folders", output.getvalue())
         self.assertIn("per folder", output.getvalue())
 

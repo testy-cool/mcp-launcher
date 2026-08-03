@@ -82,6 +82,7 @@ def parse_wrapper_args(args: list[str]) -> tuple[Control, list[str]]:
         "--mcp-none": "none",
         "--mcp-last": "last",
         "--mcp-default": "default",
+        "--mcp-use-default": "use_default",
         "--mcp-order": "order",
         "--mcp-help": "help",
     }
@@ -227,6 +228,16 @@ def selection_for_folder(
     if isinstance(default, list):
         return set(default) & available
     return fallback & available
+
+
+def configured_default_selection(state: dict, tool: str, ordered: list[str]) -> set[str]:
+    defaults = state.get("defaults", {})
+    default = defaults.get(tool) if isinstance(defaults, dict) else None
+    if not isinstance(default, list):
+        raise LauncherError(
+            f"no {tool} MCP default is configured; run {tool} --mcp-default first"
+        )
+    return set(default) & set(ordered)
 
 
 def remember_folder_selection(
@@ -667,6 +678,8 @@ def show_help() -> None:
   --mcp-none      disable every discovered MCP without opening the picker
   --mcp-last      reuse the folder/default selection without opening the picker
   --mcp-default   set the selection used for new folders, then exit
+  --mcp-use-default
+                   launch with the saved default without opening the picker
   --mcp-order     set persistent picker/preference order, then exit
   --mcp-refresh   refresh Claude.ai-managed connector discovery before picking
   --mcp-help      show this help
@@ -709,7 +722,11 @@ def run_claude(control: Control, passthrough: list[str], state: dict) -> None:
         ordered=ordered,
         fallback=claude_current_selection(home, inventory),
     )
-    selected = choose_selection(control, ordered, current, "claude")
+    selected = (
+        configured_default_selection(state, "claude", ordered)
+        if control.mode == "use_default"
+        else choose_selection(control, ordered, current, "claude")
+    )
     if control.mode == "default":
         remember_default_selection(state, "claude", ordered, selected)
         save_state(state)
@@ -742,7 +759,11 @@ def run_codex(control: Control, passthrough: list[str], state: dict) -> None:
         update_preference("codex", ordered, state)
         return
 
-    selected = choose_selection(control, ordered, current, "codex")
+    selected = (
+        configured_default_selection(state, "codex", ordered)
+        if control.mode == "use_default"
+        else choose_selection(control, ordered, current, "codex")
+    )
     if control.mode == "default":
         remember_default_selection(state, "codex", ordered, selected)
         save_state(state)

@@ -14,7 +14,7 @@ Keep the project a small Python 3.11+ standard-library program with POSIX shell 
 - `install.sh`: copies the launcher to `<prefix>/lib/mcp-launcher/`, creates `<prefix>/bin/mcp-launcher`, and replaces one marked block in the selected shell RC file.
 - `uninstall.sh`: removes only launcher-owned installation artifacts and the marked shell block; preferences survive unless `--purge` is supplied.
 - `tests/test_mcp_launcher.py`: unit coverage for argument parsing, discovery, selection, ordering, and state mutation.
-- `tests/test_install.sh`: isolated temporary-HOME smoke test for dry-run safety, installation, real-binary discovery, argument passthrough, idempotency, and uninstall.
+- `tests/test_install.sh`: isolated temporary-HOME smoke test for dry-run safety, installation, real-binary discovery, argument passthrough, default and per-folder selection precedence, idempotency, and uninstall.
 - `tests/test_doctor.sh`: verifies that `make doctor` accepts either supported CLI and rejects a machine with neither.
 - `Makefile`: public operator interface for checks, diagnostics, installation, and removal.
 - `VERSION` and `CHANGELOG.md`: release version and user-visible history.
