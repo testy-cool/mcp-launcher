@@ -3,11 +3,12 @@
 Choose which MCP servers Claude Code and Codex CLI start, and resume sessions
 with the permissions they originally used.
 
-Running `claude` or `codex` opens a checklist before the real CLI starts. Your normal arguments still pass through unchanged:
+Running `claude` or `codex` starts the real CLI normally. Add
+`--mcp-launcher` when you want the MCP checklist:
 
 ```bash
-claude --dangerously-skip-permissions
-codex resume --last
+claude --mcp-launcher
+codex --mcp-launcher --yolo
 ```
 
 This is useful when every agent session would otherwise start its own copy of resource-heavy MCP servers.
@@ -48,18 +49,31 @@ make dry-run
 
 ## Use
 
-Run either CLI normally:
+Run either CLI normally, with no MCP discovery or picker:
 
 ```bash
 claude
 codex --yolo
 ```
 
-Press Space to enable or disable an MCP, then Enter to launch. The launcher remembers that selection for the exact folder you launched from and always displays MCPs in your saved preference order. A folder without a remembered selection starts from the tool's default when one has been set.
+Open the picker only when you want to manage MCPs:
+
+```bash
+claude --mcp-launcher
+codex --mcp-launcher
+```
+
+Press Space to enable or disable an MCP, then Enter to launch. The launcher
+remembers that selection for the exact folder you launched from and always
+displays MCPs in your saved preference order. A folder without a remembered
+selection starts from the tool's default when one has been set.
 
 Launcher-only controls are removed before the real CLI receives its arguments:
 
 ```bash
+claude --mcp-launcher    # open the MCP picker, remember, then launch
+codex --mcp-launcher
+
 claude --mcp-order       # set the preferred MCP order
 codex --mcp-order
 
@@ -79,8 +93,8 @@ claude --mcp-help        # show all launcher controls
 For scripts and automation:
 
 ```bash
-MCP_LAUNCHER_SELECT=none codex --version
-MCP_LAUNCHER_SELECT=deepwiki,backlog claude --version
+MCP_LAUNCHER_SELECT=none codex --mcp-launcher --version
+MCP_LAUNCHER_SELECT=deepwiki,backlog claude --mcp-launcher --version
 ```
 
 ## Resume with original permissions
@@ -108,6 +122,10 @@ is not known until after the launcher has exited.
 
 ## How selection works
 
+- Plain `claude` and `codex` invocations bypass MCP discovery and state updates.
+  Permission-preserving resume still applies when resuming a native session.
+- `--mcp-launcher` opts into the picker. Any explicit `--mcp-*` selection
+  control also opts into MCP management without requiring the picker flag.
 - Both tools remember selected MCP names by exact resolved working directory. A remembered folder selection takes precedence over the tool default; without either, the launcher's previous native/current behavior is preserved.
 - `--mcp-use-default` bypasses the picker and any remembered folder choice, launches with the saved tool default, and remembers that choice for the folder. If no default has been configured, it launches with every discovered MCP disabled.
 - Claude also applies the choice through its native per-project `disabledMcpServers` and `disabledMcpjsonServers` state. Claude.ai connectors remain available in the picker, and running sessions are not modified.
@@ -160,5 +178,6 @@ make dry-run  # preview installation
 
 The install smoke test uses a temporary HOME and fake Claude/Codex binaries. It
 verifies dry-run safety, PATH-based binary discovery, idempotent installation,
-argument passthrough, original-permission resume, default and per-folder
-selection precedence, clean uninstall, and preference preservation.
+plain-command bypass, explicit picker activation, argument passthrough,
+original-permission resume, default and per-folder selection precedence, clean
+uninstall, and preference preservation.

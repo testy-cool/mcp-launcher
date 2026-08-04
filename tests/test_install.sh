@@ -45,17 +45,30 @@ test "$(grep -c '^# >>> mcp-launcher >>>$' "$shell_rc")" = 1
 grep -q '^export KEEP_ME=yes$' "$shell_rc"
 
 (cd "$tmp_dir" && \
-  HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" MCP_LAUNCHER_SELECT=none \
-    "$prefix/bin/mcp-launcher" claude --version > "$tmp_dir/launch.log")
+  HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \
+    "$prefix/bin/mcp-launcher" claude --version \
+      > "$tmp_dir/launch.log" 2> "$tmp_dir/launch.err")
 grep -q '^fake-claude:--version$' "$tmp_dir/launch.log"
+test ! -s "$tmp_dir/launch.err"
+test ! -e "$home_dir/.config/mcp-launcher/state.json"
+
+(cd "$tmp_dir" && \
+  HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \
+    "$prefix/bin/mcp-launcher" codex --version \
+      > "$tmp_dir/codex-plain.log" 2> "$tmp_dir/codex-plain.err")
+grep -q '^fake-codex:--version$' "$tmp_dir/codex-plain.log"
+test ! -s "$tmp_dir/codex-plain.err"
+test ! -e "$home_dir/.config/mcp-launcher/state.json"
 
 # Defaults seed unseen folders, while an exact folder keeps the selection it was given.
 mkdir -p "$tmp_dir/project-a" "$tmp_dir/project-b"
 (cd "$tmp_dir/project-a" && \
   HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" MCP_LAUNCHER_SELECT=deepwiki \
-    "$prefix/bin/mcp-launcher" codex --version > "$tmp_dir/project-a-first.log")
+    "$prefix/bin/mcp-launcher" codex --mcp-launcher --version \
+      > "$tmp_dir/project-a-first.log")
 grep -q 'mcp_servers.deepwiki.enabled=true' "$tmp_dir/project-a-first.log"
 grep -q 'mcp_servers.backlog.enabled=false' "$tmp_dir/project-a-first.log"
+! grep -q -- '--mcp-launcher' "$tmp_dir/project-a-first.log"
 
 HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" MCP_LAUNCHER_SELECT=backlog \
   "$prefix/bin/mcp-launcher" codex --mcp-default > "$tmp_dir/default.log"
@@ -98,13 +111,13 @@ printf '%s\n' \
   > "$home_dir/.claude/projects/$claude_project_name/$claude_session_id.jsonl"
 (cd "$tmp_dir/project-a" && \
   HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \
-    "$prefix/bin/mcp-launcher" claude --mcp-use-default \
-      --resume "$claude_session_id" --version \
+    "$prefix/bin/mcp-launcher" claude --resume "$claude_session_id" --version \
       > "$tmp_dir/claude-resume.log" 2> "$tmp_dir/claude-resume.err")
 grep -q "^fake-claude:--permission-mode bypassPermissions --resume $claude_session_id --version$" \
   "$tmp_dir/claude-resume.log"
 grep -q "^claude permissions ($claude_session_id): bypassPermissions$" \
   "$tmp_dir/claude-resume.err"
+! grep -q '^claude MCPs ' "$tmp_dir/claude-resume.err"
 
 codex_session_id=019fc365-cb2b-77c3-bb45-0e002a982cae
 codex_session_dir="$home_dir/.codex/sessions/2026/08/04"
@@ -115,12 +128,13 @@ printf '%s\n' \
   > "$codex_session_dir/rollout-2026-08-04T10-00-00-$codex_session_id.jsonl"
 (cd "$tmp_dir/project-a" && \
   HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \
-    "$prefix/bin/mcp-launcher" codex --mcp-use-default resume --last --version \
+    "$prefix/bin/mcp-launcher" codex resume --last --version \
       > "$tmp_dir/codex-resume.log" 2> "$tmp_dir/codex-resume.err")
 grep -q -- '--dangerously-bypass-approvals-and-sandbox resume --last --version$' \
   "$tmp_dir/codex-resume.log"
 grep -q "^codex permissions ($codex_session_id): approval=never, sandbox=danger-full-access$" \
   "$tmp_dir/codex-resume.err"
+! grep -q '^codex MCPs ' "$tmp_dir/codex-resume.err"
 
 (cd "$tmp_dir/project-a" && \
   HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \

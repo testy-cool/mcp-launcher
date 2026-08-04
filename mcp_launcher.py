@@ -31,7 +31,7 @@ class LauncherError(RuntimeError):
 
 @dataclass(frozen=True)
 class Control:
-    mode: str = "prompt"
+    mode: str = "passthrough"
     refresh: bool = False
 
 
@@ -81,10 +81,11 @@ def managed_claude_names(names: list[str]) -> list[str]:
 
 
 def parse_wrapper_args(args: list[str]) -> tuple[Control, list[str]]:
-    mode = "prompt"
+    mode = "passthrough"
     refresh = False
     passthrough: list[str] = []
     controls = {
+        "--mcp-launcher": "prompt",
         "--mcp-all": "all",
         "--mcp-none": "none",
         "--mcp-last": "last",
@@ -103,6 +104,8 @@ def parse_wrapper_args(args: list[str]) -> tuple[Control, list[str]]:
             mode = controls[arg]
         elif parsing_controls and arg == "--mcp-refresh":
             refresh = True
+            if mode == "passthrough":
+                mode = "prompt"
         else:
             passthrough.append(arg)
 
@@ -1030,6 +1033,7 @@ def update_preference(tool: str, ordered: list[str], state: dict) -> None:
 def show_help() -> None:
     print(
         """MCP launcher controls (removed before invoking Claude/Codex):
+  --mcp-launcher  open the MCP picker, remember the selection, then launch
   --mcp-all       enable every discovered MCP without opening the picker
   --mcp-none      disable every discovered MCP without opening the picker
   --mcp-last      reuse the folder/default selection without opening the picker
@@ -1041,11 +1045,13 @@ def show_help() -> None:
   --mcp-refresh   refresh Claude.ai-managed connector discovery before picking
   --mcp-help      show this help
 
-Normal invocations open the picker and remember the chosen selection per folder.
+Plain claude and codex invocations skip MCP management and launch normally.
+Use --mcp-launcher to open the picker and remember its selection per folder.
 All other arguments are forwarded unchanged.
 Exact/named resumes, Claude --continue, and Codex resume --last restore the
 session's first recorded permission state unless explicit permission flags win.
-For automation, MCP_LAUNCHER_SELECT accepts all, none, or comma-separated names.
+For automation, setting MCP_LAUNCHER_SELECT opts in and accepts all, none, or
+comma-separated names.
 """
     )
 
@@ -1061,6 +1067,17 @@ def report_permission_restore(tool: str, restore: PermissionRestore) -> None:
         f"{tool} permissions ({restore.session_id}): {restore.description}",
         file=sys.stderr,
     )
+
+
+def run_passthrough(tool: str, passthrough: list[str]) -> None:
+    home = Path.home()
+    cwd = Path.cwd()
+    binary = real_binary(tool)
+    restore = restore_resume_permissions(tool, passthrough, cwd, home)
+    restore_args = restore.args if restore else ()
+    if restore:
+        report_permission_restore(tool, restore)
+    os.execvpe(str(binary), [str(binary), *restore_args, *passthrough], os.environ)
 
 
 def run_claude(control: Control, passthrough: list[str], state: dict) -> None:
@@ -1169,6 +1186,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
+        if (
+            control.mode == "passthrough"
+            and "MCP_LAUNCHER_SELECT" not in os.environ
+        ):
+            run_passthrough(tool, passthrough)
+            return 0
         state = load_state()
         if tool == "claude":
             run_claude(control, passthrough, state)

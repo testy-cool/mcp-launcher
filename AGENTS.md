@@ -3,11 +3,11 @@
 ## Purpose
 
 This repository provides one dependency-light launcher for Claude Code and
-Codex CLI. Before either real CLI starts, the launcher lets the user select
-which discovered MCP servers to enable and keeps the picker in a saved
-preference order. Resumed sessions recover their first recorded permission
-state when the native session can be resolved before launch. All ordinary CLI
-arguments must pass through unchanged.
+Codex CLI. Plain invocations pass through without MCP discovery or selection;
+`--mcp-launcher` and the other explicit `--mcp-*` controls opt into MCP
+management. The picker stays in a saved preference order. Resumed sessions
+recover their first recorded permission state when the native session can be
+resolved before launch. All ordinary CLI arguments must pass through unchanged.
 
 Keep the project a small Python 3.11+ standard-library program with POSIX shell installation. `gum` is an optional UI enhancement; the numbered text picker is the required fallback. Do not add a package manager or runtime dependency unless the existing design cannot support the feature.
 
@@ -21,9 +21,9 @@ Keep the project a small Python 3.11+ standard-library program with POSIX shell 
 - `tests/test_mcp_launcher.py`: unit coverage for argument parsing, discovery,
   selection, ordering, resume permission recovery, and state mutation.
 - `tests/test_install.sh`: isolated temporary-HOME smoke test for dry-run safety,
-  installation, real-binary discovery, argument passthrough, resume permission
-  recovery, default and per-folder selection precedence, idempotency, and
-  uninstall.
+  installation, real-binary discovery, plain-command bypass, explicit picker
+  activation, argument passthrough, resume permission recovery, default and
+  per-folder selection precedence, idempotency, and uninstall.
 - `tests/test_doctor.sh`: verifies that `make doctor` accepts either supported CLI and rejects a machine with neither.
 - `Makefile`: public operator interface for checks, diagnostics, installation, and removal.
 - `VERSION` and `CHANGELOG.md`: release version and user-visible history.
@@ -32,12 +32,15 @@ Keep the project a small Python 3.11+ standard-library program with POSIX shell 
 
 1. Shell functions installed in `.zshrc` or `.bashrc` call `mcp-launcher claude ...` or `mcp-launcher codex ...`.
 2. The launcher resolves the real binary from `PATH`, with `MCP_LAUNCHER_REAL_CLAUDE` and `MCP_LAUNCHER_REAL_CODEX` as explicit overrides. It must reject resolution back to itself.
-3. Claude MCPs are discovered from `~/.claude.json` plus `.mcp.json` files from the current directory through its ancestors. The selection is applied through Claude's project-scoped disabled-server lists, including `.claude/settings.local.json` for `.mcp.json` servers.
-4. Codex MCPs are discovered with `codex mcp list --json` and ordered using `~/.codex/config.toml` when available. Selection is passed only to the launched process through `-c mcp_servers.<name>...` overrides.
-5. Exact/named resumes, Claude `--continue`, and Codex `resume --last` read the
+3. Plain invocations exec the real CLI without MCP discovery or state access.
+   `--mcp-launcher`, any explicit selection control, or
+   `MCP_LAUNCHER_SELECT` opts into MCP management.
+4. Claude MCPs are discovered from `~/.claude.json` plus `.mcp.json` files from the current directory through its ancestors. The selection is applied through Claude's project-scoped disabled-server lists, including `.claude/settings.local.json` for `.mcp.json` servers.
+5. Codex MCPs are discovered with `codex mcp list --json` and ordered using `~/.codex/config.toml` when available. Selection is passed only to the launched process through `-c mcp_servers.<name>...` overrides.
+6. Exact/named resumes, Claude `--continue`, and Codex `resume --last` read the
    first permission state from the selected native transcript and pass matching
    permission flags to the real CLI. Explicit permission flags take precedence.
-6. Picker preferences, per-tool defaults, and remembered selections for both clients live in `~/.config/mcp-launcher/state.json`, written atomically with mode `0600`.
+7. Picker preferences, per-tool defaults, and remembered selections for both clients live in `~/.config/mcp-launcher/state.json`, written atomically with mode `0600`.
 
 The launcher may cache MCP names, selections, and preference order. It must
 never copy MCP definitions, OAuth data, credentials, headers, transcripts,
@@ -89,8 +92,8 @@ For changes affecting installed behavior, also reinstall the checkout and exerci
 
 ```bash
 make install
-MCP_LAUNCHER_SELECT=none mcp-launcher claude --version
-MCP_LAUNCHER_SELECT=none mcp-launcher codex --version
+MCP_LAUNCHER_SELECT=none mcp-launcher claude --mcp-launcher --version
+MCP_LAUNCHER_SELECT=none mcp-launcher codex --mcp-launcher --version
 ```
 
 Before a release:

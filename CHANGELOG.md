@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Make MCP management opt-in with `--mcp-launcher`; plain `claude` and `codex`
+  invocations now skip MCP discovery, selection, and state updates while keeping
+  permission-preserving resume behavior.
+
 ## 0.2.0 - 2026-08-04
 
 - Restore a resumed Claude or Codex session's first recorded permission state

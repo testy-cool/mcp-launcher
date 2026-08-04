@@ -585,6 +585,20 @@ class PreferenceTests(unittest.TestCase):
 
 
 class WrapperArgumentTests(unittest.TestCase):
+    def test_normal_invocation_bypasses_mcp_management(self):
+        control, passthrough = parse_wrapper_args(["--model", "opus"])
+
+        self.assertEqual(control.mode, "passthrough")
+        self.assertEqual(passthrough, ["--model", "opus"])
+
+    def test_mcp_launcher_control_opens_picker_and_is_not_forwarded(self):
+        control, passthrough = parse_wrapper_args(
+            ["--mcp-launcher", "--model", "opus"]
+        )
+
+        self.assertEqual(control.mode, "prompt")
+        self.assertEqual(passthrough, ["--model", "opus"])
+
     def test_strips_only_wrapper_controls_and_preserves_cli_arguments(self):
         control, passthrough = parse_wrapper_args(
             [
@@ -639,6 +653,11 @@ class WrapperArgumentTests(unittest.TestCase):
         self.assertIn("all MCPs disabled", output.getvalue())
         self.assertIn("new folders", output.getvalue())
         self.assertIn("per folder", output.getvalue())
+        self.assertIn("--mcp-launcher", output.getvalue())
+        self.assertIn(
+            "Plain claude and codex invocations skip MCP management",
+            output.getvalue(),
+        )
 
 
 class CodexTests(unittest.TestCase):
