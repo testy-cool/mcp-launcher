@@ -1,6 +1,7 @@
 # MCP Launcher
 
-Choose which MCP servers Claude Code and Codex CLI start for each session.
+Choose which MCP servers Claude Code and Codex CLI start, and resume sessions
+with the permissions they originally used.
 
 Running `claude` or `codex` opens a checklist before the real CLI starts. Your normal arguments still pass through unchanged:
 
@@ -82,13 +83,38 @@ MCP_LAUNCHER_SELECT=none codex --version
 MCP_LAUNCHER_SELECT=deepwiki,backlog claude --version
 ```
 
+## Resume with original permissions
+
+Use the CLIs' normal resume commands:
+
+```bash
+claude --resume <session-id-or-name>
+claude --continue
+codex resume <session-id-or-name>
+codex resume --last
+```
+
+For an exact or named resume, the launcher finds the native Claude/Codex
+transcript. For `claude --continue` and `codex resume --last`, it finds the most
+recent native session for the current folder. It then passes the first recorded
+permission mode back to the real CLI. Codex sandboxed sessions also recover the
+recorded approval policy and workspace network setting when available.
+
+Permission flags supplied on the resume command take precedence. For Codex,
+that precedence is per setting: an explicit sandbox can still be paired with
+the session's original approval policy. A bare resume command that opens the
+CLI's interactive session picker is left untouched because the selected session
+is not known until after the launcher has exited.
+
 ## How selection works
 
 - Both tools remember selected MCP names by exact resolved working directory. A remembered folder selection takes precedence over the tool default; without either, the launcher's previous native/current behavior is preserved.
 - `--mcp-use-default` bypasses the picker and any remembered folder choice, launches with the saved tool default, and remembers that choice for the folder. If no default has been configured, it launches with every discovered MCP disabled.
 - Claude also applies the choice through its native per-project `disabledMcpServers` and `disabledMcpjsonServers` state. Claude.ai connectors remain available in the picker, and running sessions are not modified.
 - Codex receives launch-scoped `mcp_servers.<name>.enabled` overrides. Plugin-contributed MCPs are supported without disabling the rest of their plugin.
-- MCP definitions, OAuth data, headers, and credentials are never copied into the launcher state.
+- MCP definitions, OAuth data, headers, credentials, transcripts, and permission
+  metadata are never copied into launcher state. Resume metadata is read directly
+  from the CLIs' native files at launch time.
 - Defaults, per-folder selections, and picker preferences live in `~/.config/mcp-launcher/state.json` with mode `0600`.
 
 ## Update or uninstall
@@ -132,4 +158,7 @@ make doctor   # verify Python, Claude, Codex, and optional gum
 make dry-run  # preview installation
 ```
 
-The install smoke test uses a temporary HOME and fake Claude/Codex binaries. It verifies dry-run safety, PATH-based binary discovery, idempotent installation, argument passthrough, default and per-folder selection precedence, clean uninstall, and preference preservation.
+The install smoke test uses a temporary HOME and fake Claude/Codex binaries. It
+verifies dry-run safety, PATH-based binary discovery, idempotent installation,
+argument passthrough, original-permission resume, default and per-folder
+selection precedence, clean uninstall, and preference preservation.

@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import stat
 import sys
 import tempfile
@@ -10,6 +11,8 @@ from pathlib import Path
 
 LIB_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(LIB_DIR))
+
+import mcp_launcher  # noqa: E402
 
 from mcp_launcher import (  # noqa: E402
     LauncherError,
@@ -29,6 +32,394 @@ from mcp_launcher import (  # noqa: E402
     selection_for_folder,
     show_help,
 )
+
+
+class ResumePermissionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.home = Path(self.temp_dir.name) / "home"
+        self.cwd = Path("/work/project")
+        self.claude_project = self.home / ".claude" / "projects" / "-work-project"
+        self.claude_project.mkdir(parents=True)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_claude_exact_resume_restores_original_bypass_mode(self):
+        restore_resume_permissions = getattr(
+            mcp_launcher, "restore_resume_permissions", None
+        )
+        self.assertIsNotNone(restore_resume_permissions)
+        session_id = "002fdc59-744f-4c85-9d26-a40573d216e0"
+        transcript = self.claude_project / f"{session_id}.jsonl"
+        transcript.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "permission-mode",
+                            "sessionId": session_id,
+                            "permissionMode": "bypassPermissions",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "user",
+                            "sessionId": session_id,
+                            "cwd": str(self.cwd),
+                            "permissionMode": "manual",
+                        }
+                    ),
+                ]
+            )
+        )
+
+        restored = restore_resume_permissions(
+            "claude",
+            ["--resume", session_id, "--model", "opus"],
+            cwd=self.cwd,
+            home=self.home,
+        )
+
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored.session_id, session_id)
+        self.assertEqual(
+            restored.args,
+            ("--permission-mode", "bypassPermissions"),
+        )
+
+    def test_explicit_claude_permission_mode_wins_over_recorded_mode(self):
+        session_id = "002fdc59-744f-4c85-9d26-a40573d216e0"
+        transcript = self.claude_project / f"{session_id}.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "permission-mode",
+                    "sessionId": session_id,
+                    "permissionMode": "bypassPermissions",
+                }
+            )
+        )
+
+        restored = mcp_launcher.restore_resume_permissions(
+            "claude",
+            ["--permission-mode", "plan", "--resume", session_id],
+            cwd=self.cwd,
+            home=self.home,
+        )
+
+        self.assertIsNone(restored)
+
+    def test_claude_continue_restores_latest_session_for_folder(self):
+        old_id = "002fdc59-744f-4c85-9d26-a40573d216e1"
+        latest_id = "002fdc59-744f-4c85-9d26-a40573d216e2"
+        old_transcript = self.claude_project / f"{old_id}.jsonl"
+        latest_transcript = self.claude_project / f"{latest_id}.jsonl"
+        old_transcript.write_text(
+            json.dumps({"sessionId": old_id, "permissionMode": "plan"})
+        )
+        latest_transcript.write_text(
+            json.dumps({"sessionId": latest_id, "permissionMode": "dontAsk"})
+        )
+        os.utime(old_transcript, (10, 10))
+        os.utime(latest_transcript, (20, 20))
+
+        restored = mcp_launcher.restore_resume_permissions(
+            "claude",
+            ["--continue", "--model", "opus"],
+            cwd=self.cwd,
+            home=self.home,
+        )
+
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored.session_id, latest_id)
+        self.assertEqual(restored.args, ("--permission-mode", "dontAsk"))
+
+    def test_claude_named_resume_resolves_custom_title(self):
+        session_id = "002fdc59-744f-4c85-9d26-a40573d216e3"
+        transcript = self.claude_project / f"{session_id}.jsonl"
+        transcript.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {"sessionId": session_id, "permissionMode": "default"}
+                    ),
+                    json.dumps(
+                        {
+                            "type": "custom-title",
+                            "sessionId": session_id,
+                            "customTitle": "nightly-refactor",
+                        }
+                    ),
+                ]
+            )
+        )
+
+        restored = mcp_launcher.restore_resume_permissions(
+            "claude",
+            ["--resume", "nightly-refactor"],
+            cwd=self.cwd,
+            home=self.home,
+        )
+
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored.session_id, session_id)
+        self.assertEqual(restored.args, ("--permission-mode", "manual"))
+
+    def test_codex_exact_resume_restores_original_yolo_policy(self):
+        session_id = "019fc365-cb2b-77c3-bb45-0e002a982cae"
+        session_dir = self.home / ".codex" / "sessions" / "2026" / "08" / "04"
+        session_dir.mkdir(parents=True)
+        transcript = session_dir / f"rollout-2026-08-04T10-00-00-{session_id}.jsonl"
+        transcript.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "session_meta",
+                            "payload": {"id": session_id, "cwd": str(self.cwd), "source": "cli"},
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "turn_context",
+                            "payload": {
+                                "approval_policy": "never",
+                                "sandbox_policy": {"type": "danger-full-access"},
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "turn_context",
+                            "payload": {
+                                "approval_policy": "on-request",
+                                "sandbox_policy": {"type": "workspace-write"},
+                            },
+                        }
+                    ),
+                ]
+            )
+        )
+
+        restored = mcp_launcher.restore_resume_permissions(
+            "codex",
+            ["resume", session_id],
+            cwd=self.cwd,
+            home=self.home,
+        )
+
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored.session_id, session_id)
+        self.assertEqual(
+            restored.args,
+            ("--dangerously-bypass-approvals-and-sandbox",),
+        )
+
+    def test_codex_named_resume_uses_native_session_index(self):
+        session_id = "019fc365-cb2b-77c3-bb45-0e002a982cb4"
+        session_dir = self.home / ".codex" / "sessions" / "2026" / "08" / "04"
+        session_dir.mkdir(parents=True)
+        transcript = session_dir / f"rollout-2026-08-04T10-30-00-{session_id}.jsonl"
+        transcript.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "session_meta",
+                            "payload": {
+                                "id": session_id,
+                                "cwd": str(self.cwd),
+                                "source": "cli",
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "turn_context",
+                            "payload": {
+                                "approval_policy": "untrusted",
+                                "sandbox_policy": {"type": "read-only"},
+                            },
+                        }
+                    ),
+                ]
+            )
+        )
+        (self.home / ".codex" / "session_index.jsonl").write_text(
+            json.dumps(
+                {
+                    "id": session_id,
+                    "thread_name": "nightly-refactor",
+                    "updated_at": "2026-08-04T10:31:00Z",
+                }
+            )
+        )
+
+        restored = mcp_launcher.restore_resume_permissions(
+            "codex",
+            ["resume", "nightly-refactor"],
+            cwd=self.cwd,
+            home=self.home,
+        )
+
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored.session_id, session_id)
+        self.assertEqual(
+            restored.args,
+            ("--sandbox", "read-only", "--ask-for-approval", "untrusted"),
+        )
+
+    def test_codex_exact_resume_restores_sandbox_approval_and_network(self):
+        session_id = "019fc365-cb2b-77c3-bb45-0e002a982caf"
+        session_dir = self.home / ".codex" / "sessions" / "2026" / "08" / "04"
+        session_dir.mkdir(parents=True)
+        transcript = session_dir / f"rollout-2026-08-04T11-00-00-{session_id}.jsonl"
+        transcript.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "session_meta",
+                            "payload": {"id": session_id, "cwd": str(self.cwd), "source": "cli"},
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "turn_context",
+                            "payload": {
+                                "approval_policy": "on-request",
+                                "sandbox_policy": {
+                                    "type": "workspace-write",
+                                    "network_access": True,
+                                },
+                            },
+                        }
+                    ),
+                ]
+            )
+        )
+
+        restored = mcp_launcher.restore_resume_permissions(
+            "codex",
+            ["resume", session_id],
+            cwd=self.cwd,
+            home=self.home,
+        )
+
+        self.assertIsNotNone(restored)
+        self.assertEqual(
+            restored.args,
+            (
+                "--sandbox",
+                "workspace-write",
+                "--ask-for-approval",
+                "on-request",
+                "-c",
+                "sandbox_workspace_write.network_access=true",
+            ),
+        )
+
+    def test_explicit_codex_sandbox_wins_while_approval_is_restored(self):
+        session_id = "019fc365-cb2b-77c3-bb45-0e002a982cb0"
+        session_dir = self.home / ".codex" / "sessions" / "2026" / "08" / "04"
+        session_dir.mkdir(parents=True)
+        transcript = session_dir / f"rollout-2026-08-04T12-00-00-{session_id}.jsonl"
+        transcript.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "session_meta",
+                            "payload": {
+                                "id": session_id,
+                                "cwd": str(self.cwd),
+                                "source": "cli",
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "turn_context",
+                            "payload": {
+                                "approval_policy": "never",
+                                "sandbox_policy": {"type": "danger-full-access"},
+                            },
+                        }
+                    ),
+                ]
+            )
+        )
+
+        restored = mcp_launcher.restore_resume_permissions(
+            "codex",
+            ["--sandbox", "read-only", "resume", session_id],
+            cwd=self.cwd,
+            home=self.home,
+        )
+
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored.args, ("--ask-for-approval", "never"))
+
+    def test_codex_last_restores_latest_session_for_folder(self):
+        session_dir = self.home / ".codex" / "sessions" / "2026" / "08" / "04"
+        session_dir.mkdir(parents=True)
+
+        def write_session(
+            session_id: str,
+            session_cwd: Path,
+            modified: int,
+            approval: str,
+            sandbox: str,
+        ) -> None:
+            transcript = session_dir / f"rollout-2026-08-04T13-00-00-{session_id}.jsonl"
+            transcript.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "type": "session_meta",
+                                "payload": {
+                                    "id": session_id,
+                                    "cwd": str(session_cwd),
+                                    "source": "cli",
+                                },
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "turn_context",
+                                "payload": {
+                                    "approval_policy": approval,
+                                    "sandbox_policy": {"type": sandbox},
+                                },
+                            }
+                        ),
+                    ]
+                )
+            )
+            os.utime(transcript, (modified, modified))
+
+        old_id = "019fc365-cb2b-77c3-bb45-0e002a982cb1"
+        latest_id = "019fc365-cb2b-77c3-bb45-0e002a982cb2"
+        other_id = "019fc365-cb2b-77c3-bb45-0e002a982cb3"
+        write_session(old_id, self.cwd, 10, "never", "danger-full-access")
+        write_session(latest_id, self.cwd, 20, "untrusted", "read-only")
+        write_session(other_id, Path("/work/other"), 30, "never", "danger-full-access")
+
+        restored = mcp_launcher.restore_resume_permissions(
+            "codex",
+            ["resume", "--last", "continue the work"],
+            cwd=self.cwd,
+            home=self.home,
+        )
+
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored.session_id, latest_id)
+        self.assertEqual(
+            restored.args,
+            ("--sandbox", "read-only", "--ask-for-approval", "untrusted"),
+        )
 
 
 class StateTests(unittest.TestCase):

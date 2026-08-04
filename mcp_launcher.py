@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Interactive, preference-ordered MCP selection for Claude Code and Codex."""
+"""MCP selection and permission-preserving resume for Claude Code and Codex."""
 
 from __future__ import annotations
 
@@ -33,6 +33,13 @@ class LauncherError(RuntimeError):
 class Control:
     mode: str = "prompt"
     refresh: bool = False
+
+
+@dataclass(frozen=True)
+class PermissionRestore:
+    session_id: str
+    args: tuple[str, ...]
+    description: str
 
 
 @dataclass(frozen=True)
@@ -258,6 +265,357 @@ def remember_default_selection(
     state.setdefault("defaults", {})[tool] = [
         name for name in ordered if name in selected
     ]
+
+
+def args_before_separator(args: list[str]) -> list[str]:
+    return args[: args.index("--")] if "--" in args else args
+
+
+def iter_json_lines(path: Path) -> Iterable[dict]:
+    try:
+        with path.open() as handle:
+            for line in handle:
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(event, dict):
+                    yield event
+    except OSError:
+        return
+
+
+def claude_project_directory(home: Path, cwd: Path) -> Path:
+    project_name = re.sub(r"[^A-Za-z0-9]", "-", str(cwd.resolve()))
+    return home / ".claude" / "projects" / project_name
+
+
+def claude_resume_transcript(
+    controls: list[str], home: Path, cwd: Path
+) -> Path | None:
+    projects_root = home / ".claude" / "projects"
+    current_project = claude_project_directory(home, cwd)
+    if any(arg in {"--continue", "-c"} for arg in controls):
+        candidates = list(current_project.glob("*.jsonl"))
+        return max(candidates, key=lambda path: path.stat().st_mtime, default=None)
+
+    reference: str | None = None
+    for index, arg in enumerate(controls):
+        if arg.startswith("--resume="):
+            reference = arg.split("=", 1)[1]
+            break
+        if arg in {"--resume", "-r"} and index + 1 < len(controls):
+            candidate = controls[index + 1]
+            if candidate and not candidate.startswith("-"):
+                reference = candidate
+            break
+    if not reference:
+        return None
+
+    candidates = list(projects_root.glob("*/*.jsonl"))
+    for transcript in candidates:
+        if transcript.stem == reference:
+            return transcript
+
+    def candidate_rank(path: Path) -> tuple[bool, float]:
+        return path.parent == current_project, path.stat().st_mtime
+
+    for transcript in sorted(candidates, key=candidate_rank, reverse=True):
+        for event in iter_json_lines(transcript):
+            if (
+                event.get("type") == "custom-title"
+                and event.get("customTitle") == reference
+            ):
+                return transcript
+    return None
+
+
+def restore_claude_resume_permissions(
+    passthrough: list[str], cwd: Path, home: Path
+) -> PermissionRestore | None:
+    controls = args_before_separator(passthrough)
+    if any(
+        arg == "--dangerously-skip-permissions"
+        or arg == "--permission-mode"
+        or arg.startswith("--permission-mode=")
+        for arg in controls
+    ):
+        return None
+    transcript = claude_resume_transcript(controls, home, cwd)
+    if transcript is None:
+        return None
+
+    mode: str | None = None
+    session_id = transcript.stem
+    for event in iter_json_lines(transcript):
+        candidate = event.get("permissionMode")
+        if isinstance(candidate, str):
+            mode = candidate
+            break
+    if mode == "default":
+        mode = "manual"
+    valid_modes = {
+        "acceptEdits",
+        "auto",
+        "bypassPermissions",
+        "dontAsk",
+        "manual",
+        "plan",
+    }
+    if mode not in valid_modes:
+        return None
+    return PermissionRestore(
+        session_id=session_id,
+        args=("--permission-mode", mode),
+        description=mode,
+    )
+
+
+def codex_session_files(codex_home: Path) -> list[Path]:
+    return list((codex_home / "sessions").glob("*/*/*/*.jsonl"))
+
+
+def codex_session_metadata(transcript: Path) -> dict:
+    for event in iter_json_lines(transcript):
+        if event.get("type") == "session_meta" and isinstance(
+            event.get("payload"), dict
+        ):
+            return event["payload"]
+    return {}
+
+
+def codex_effective_cwd(controls: list[str], cwd: Path) -> Path:
+    for index, arg in enumerate(controls):
+        value: str | None = None
+        if arg.startswith("--cd="):
+            value = arg.split("=", 1)[1]
+        elif arg in {"--cd", "-C"} and index + 1 < len(controls):
+            value = controls[index + 1]
+        if value:
+            requested = Path(value)
+            if requested.is_absolute():
+                return requested.resolve()
+            return (cwd / requested).resolve()
+    return cwd.resolve()
+
+
+def codex_resume_reference(controls: list[str], resume_index: int) -> str | None:
+    value_options = {
+        "--add-dir",
+        "--ask-for-approval",
+        "--cd",
+        "--color",
+        "--config",
+        "--disable",
+        "--enable",
+        "--image",
+        "--model",
+        "--oss-provider",
+        "--profile",
+        "--sandbox",
+        "-C",
+        "-a",
+        "-c",
+        "-i",
+        "-m",
+        "-p",
+        "-s",
+    }
+    index = resume_index + 1
+    while index < len(controls):
+        arg = controls[index]
+        if arg in value_options:
+            index += 2
+            continue
+        if arg.startswith("-"):
+            index += 1
+            continue
+        return arg
+    return None
+
+
+def codex_transcript_for_resume(
+    controls: list[str], resume_index: int, codex_home: Path, cwd: Path
+) -> Path | None:
+    candidates = codex_session_files(codex_home)
+    reference = (
+        None
+        if "--last" in controls
+        else codex_resume_reference(controls, resume_index)
+    )
+    if reference:
+        for transcript in candidates:
+            if transcript.name.endswith(f"-{reference}.jsonl"):
+                return transcript
+        for transcript in candidates:
+            metadata = codex_session_metadata(transcript)
+            if metadata.get("id") == reference or metadata.get("session_id") == reference:
+                return transcript
+
+        index_path = codex_home / "session_index.jsonl"
+        named_session_id: str | None = None
+        for entry in iter_json_lines(index_path):
+            if entry.get("thread_name") == reference and isinstance(
+                entry.get("id"), str
+            ):
+                named_session_id = entry["id"]
+        if named_session_id:
+            for transcript in candidates:
+                metadata = codex_session_metadata(transcript)
+                if named_session_id in {metadata.get("id"), metadata.get("session_id")}:
+                    return transcript
+        return None
+
+    if "--last" not in controls:
+        return None
+    include_all_folders = "--all" in controls
+    include_non_interactive = "--include-non-interactive" in controls
+    effective_cwd = codex_effective_cwd(controls, cwd)
+    matching: list[Path] = []
+    for transcript in candidates:
+        metadata = codex_session_metadata(transcript)
+        if not include_non_interactive and metadata.get("source") not in {None, "cli"}:
+            continue
+        session_cwd = metadata.get("cwd")
+        if not include_all_folders and (
+            not isinstance(session_cwd, str)
+            or Path(session_cwd).resolve() != effective_cwd
+        ):
+            continue
+        matching.append(transcript)
+    return max(matching, key=lambda path: path.stat().st_mtime, default=None)
+
+
+def codex_explicit_permissions(controls: list[str]) -> tuple[bool, bool, bool]:
+    if any(
+        arg in {
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--full-auto",
+            "--yolo",
+        }
+        for arg in controls
+    ):
+        return True, True, True
+
+    sandbox = any(
+        arg in {"--sandbox", "-s"} or arg.startswith("--sandbox=")
+        for arg in controls
+    )
+    approval = any(
+        arg in {"--ask-for-approval", "-a"}
+        or arg.startswith("--ask-for-approval=")
+        for arg in controls
+    )
+    network = False
+    for index, arg in enumerate(controls):
+        config: str | None = None
+        if arg.startswith("--config="):
+            config = arg.split("=", 1)[1]
+        elif arg in {"--config", "-c"} and index + 1 < len(controls):
+            config = controls[index + 1]
+        if not config:
+            continue
+        key = config.split("=", 1)[0].strip()
+        sandbox = sandbox or key in {"sandbox_mode", "sandbox_policy"}
+        approval = approval or key == "approval_policy"
+        network = network or key == "sandbox_workspace_write.network_access"
+    return sandbox, approval, network
+
+
+def restore_codex_resume_permissions(
+    passthrough: list[str], cwd: Path, home: Path
+) -> PermissionRestore | None:
+    controls = args_before_separator(passthrough)
+    try:
+        resume_index = controls.index("resume")
+    except ValueError:
+        return None
+    codex_home = Path(os.environ.get("CODEX_HOME", home / ".codex"))
+    transcript = codex_transcript_for_resume(
+        controls, resume_index, codex_home, cwd
+    )
+    if transcript is None:
+        return None
+
+    approval_policy: str | None = None
+    sandbox_mode: str | None = None
+    network_access: bool | None = None
+    for event in iter_json_lines(transcript):
+        if event.get("type") != "turn_context":
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        approval = payload.get("approval_policy")
+        sandbox = payload.get("sandbox_policy")
+        if isinstance(approval, str):
+            approval_policy = approval
+        if isinstance(sandbox, dict) and isinstance(sandbox.get("type"), str):
+            sandbox_mode = sandbox["type"]
+            if isinstance(sandbox.get("network_access"), bool):
+                network_access = sandbox["network_access"]
+        break
+
+    metadata = codex_session_metadata(transcript)
+    session_id = metadata.get("id") or metadata.get("session_id") or transcript.stem
+    if not isinstance(session_id, str):
+        return None
+    explicit_sandbox, explicit_approval, explicit_network = codex_explicit_permissions(
+        controls
+    )
+    if explicit_sandbox and explicit_approval:
+        return None
+    if (
+        not explicit_sandbox
+        and not explicit_approval
+        and approval_policy == "never"
+        and sandbox_mode == "danger-full-access"
+    ):
+        return PermissionRestore(
+            session_id=session_id,
+            args=("--dangerously-bypass-approvals-and-sandbox",),
+            description="approval=never, sandbox=danger-full-access",
+        )
+
+    permission_args: list[str] = []
+    if not explicit_sandbox and sandbox_mode in {
+        "read-only",
+        "workspace-write",
+        "danger-full-access",
+    }:
+        permission_args.extend(["--sandbox", sandbox_mode])
+    if not explicit_approval and approval_policy in {"untrusted", "on-request", "never"}:
+        permission_args.extend(["--ask-for-approval", approval_policy])
+    if (
+        not explicit_sandbox
+        and not explicit_network
+        and sandbox_mode == "workspace-write"
+        and network_access is not None
+    ):
+        enabled = "true" if network_access else "false"
+        permission_args.extend(
+            ["-c", f"sandbox_workspace_write.network_access={enabled}"]
+        )
+    if not permission_args:
+        return None
+    return PermissionRestore(
+        session_id=session_id,
+        args=tuple(permission_args),
+        description=f"approval={approval_policy}, sandbox={sandbox_mode}",
+    )
+
+
+def restore_resume_permissions(
+    tool: str,
+    passthrough: list[str],
+    cwd: Path,
+    home: Path,
+) -> PermissionRestore | None:
+    if tool == "claude":
+        return restore_claude_resume_permissions(passthrough, cwd, home)
+    if tool == "codex":
+        return restore_codex_resume_permissions(passthrough, cwd, home)
+    return None
 
 
 def mapping_names(value: object) -> list[str]:
@@ -685,6 +1043,8 @@ def show_help() -> None:
 
 Normal invocations open the picker and remember the chosen selection per folder.
 All other arguments are forwarded unchanged.
+Exact/named resumes, Claude --continue, and Codex resume --last restore the
+session's first recorded permission state unless explicit permission flags win.
 For automation, MCP_LAUNCHER_SELECT accepts all, none, or comma-separated names.
 """
     )
@@ -696,13 +1056,21 @@ def report_selection(tool: str, ordered: list[str], selected: set[str]) -> None:
     print(f"{tool} MCPs ({len(active)}/{len(ordered)}): {value}", file=sys.stderr)
 
 
+def report_permission_restore(tool: str, restore: PermissionRestore) -> None:
+    print(
+        f"{tool} permissions ({restore.session_id}): {restore.description}",
+        file=sys.stderr,
+    )
+
+
 def run_claude(control: Control, passthrough: list[str], state: dict) -> None:
     home = Path.home()
+    cwd = Path.cwd()
     binary = real_binary("claude")
     cached = state["catalog"].get("claude", [])
     if control.refresh:
         cached = managed_claude_names(refresh_claude_catalog(binary))
-    inventory = discover_claude(home=home, cwd=Path.cwd(), cached_names=cached)
+    inventory = discover_claude(home=home, cwd=cwd, cached_names=cached)
     state["catalog"]["claude"] = managed_claude_names(inventory.names)
     saved_preference = state["preference"].get("claude", [])
     ordered = merge_preference(saved_preference, inventory.names)
@@ -735,16 +1103,22 @@ def run_claude(control: Control, passthrough: list[str], state: dict) -> None:
     remember_folder_selection(state, "claude", cwd_key, ordered, selected)
     save_state(state)
     report_selection("claude", ordered, selected)
-    os.execvpe(str(binary), [str(binary), *passthrough], os.environ)
+    restore = restore_resume_permissions("claude", passthrough, cwd, home)
+    restore_args = restore.args if restore else ()
+    if restore:
+        report_permission_restore("claude", restore)
+    os.execvpe(str(binary), [str(binary), *restore_args, *passthrough], os.environ)
 
 
 def run_codex(control: Control, passthrough: list[str], state: dict) -> None:
+    home = Path.home()
+    cwd = Path.cwd()
     binary = real_binary("codex")
     inventory = discover_codex(binary)
     saved_preference = state["preference"].get("codex", [])
     ordered = merge_preference(saved_preference, inventory.names)
     state["preference"]["codex"] = retain_preference(saved_preference, inventory.names)
-    cwd_key = str(Path.cwd().resolve())
+    cwd_key = str(cwd.resolve())
     current = selection_for_folder(
         state,
         tool="codex",
@@ -772,7 +1146,15 @@ def run_codex(control: Control, passthrough: list[str], state: dict) -> None:
     save_state(state)
     report_selection("codex", ordered, selected)
     overrides = codex_override_args(ordered, selected, inventory.standalone_transports)
-    os.execvpe(str(binary), [str(binary), *overrides, *passthrough], os.environ)
+    restore = restore_resume_permissions("codex", passthrough, cwd, home)
+    restore_args = restore.args if restore else ()
+    if restore:
+        report_permission_restore("codex", restore)
+    os.execvpe(
+        str(binary),
+        [str(binary), *overrides, *restore_args, *passthrough],
+        os.environ,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

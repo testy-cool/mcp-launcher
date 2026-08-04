@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Restore a resumed Claude or Codex session's first recorded permission state
+  for exact/named resumes, Claude `--continue`, and Codex `resume --last`, while
+  honoring explicit permission overrides.
 - Add per-tool MCP defaults for folders without a saved selection.
 - Remember selections by exact working directory for both Claude Code and Codex CLI.
 - Add `--mcp-use-default` to launch directly with a saved default without opening the picker, falling back to all MCPs disabled when unset.

@@ -89,6 +89,39 @@ grep -q 'mcp_servers.deepwiki.enabled=false' "$tmp_dir/project-a-default.log"
 grep -q 'mcp_servers.backlog.enabled=true' "$tmp_dir/project-a-default.log"
 ! grep -q -- '--mcp-use-default' "$tmp_dir/project-a-default.log"
 
+# Resumed sessions recover their first recorded permission state before launch.
+claude_session_id=002fdc59-744f-4c85-9d26-a40573d216e0
+claude_project_name=$(printf '%s' "$tmp_dir/project-a" | sed 's/[^A-Za-z0-9]/-/g')
+mkdir -p "$home_dir/.claude/projects/$claude_project_name"
+printf '%s\n' \
+  "{\"sessionId\":\"$claude_session_id\",\"permissionMode\":\"bypassPermissions\"}" \
+  > "$home_dir/.claude/projects/$claude_project_name/$claude_session_id.jsonl"
+(cd "$tmp_dir/project-a" && \
+  HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \
+    "$prefix/bin/mcp-launcher" claude --mcp-use-default \
+      --resume "$claude_session_id" --version \
+      > "$tmp_dir/claude-resume.log" 2> "$tmp_dir/claude-resume.err")
+grep -q "^fake-claude:--permission-mode bypassPermissions --resume $claude_session_id --version$" \
+  "$tmp_dir/claude-resume.log"
+grep -q "^claude permissions ($claude_session_id): bypassPermissions$" \
+  "$tmp_dir/claude-resume.err"
+
+codex_session_id=019fc365-cb2b-77c3-bb45-0e002a982cae
+codex_session_dir="$home_dir/.codex/sessions/2026/08/04"
+mkdir -p "$codex_session_dir"
+printf '%s\n' \
+  "{\"type\":\"session_meta\",\"payload\":{\"id\":\"$codex_session_id\",\"cwd\":\"$tmp_dir/project-a\",\"source\":\"cli\"}}" \
+  '{"type":"turn_context","payload":{"approval_policy":"never","sandbox_policy":{"type":"danger-full-access"}}}' \
+  > "$codex_session_dir/rollout-2026-08-04T10-00-00-$codex_session_id.jsonl"
+(cd "$tmp_dir/project-a" && \
+  HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \
+    "$prefix/bin/mcp-launcher" codex --mcp-use-default resume --last --version \
+      > "$tmp_dir/codex-resume.log" 2> "$tmp_dir/codex-resume.err")
+grep -q -- '--dangerously-bypass-approvals-and-sandbox resume --last --version$' \
+  "$tmp_dir/codex-resume.log"
+grep -q "^codex permissions ($codex_session_id): approval=never, sandbox=danger-full-access$" \
+  "$tmp_dir/codex-resume.err"
+
 (cd "$tmp_dir/project-a" && \
   HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \
     "$prefix/bin/mcp-launcher" codex --mcp-last --version \
