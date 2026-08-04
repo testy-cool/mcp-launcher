@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0 - 2026-08-04
+
 - Restore a resumed Claude or Codex session's first recorded permission state
   for exact/named resumes, Claude `--continue`, and Codex `resume --last`, while
   honoring explicit permission overrides.
