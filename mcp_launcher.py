@@ -23,6 +23,15 @@ DEFAULT_REAL_BINARIES = {
 }
 STATE_PATH = Path.home() / ".config/mcp-launcher/state.json"
 STATE_VERSION = 1
+SECRETS_RESOLVED_ENV = "MCP_LAUNCHER_SECRETS_RESOLVED"
+SERVICE_ACCOUNT_TOKEN_ENV = "OP_SERVICE_ACCOUNT_TOKEN"
+BIOMETRIC_UNLOCK_ENV = "OP_BIOMETRIC_UNLOCK_ENABLED"
+KEYRING_ATTRIBUTES = (
+    "application",
+    "mcp-launcher",
+    "credential",
+    "op-service-account",
+)
 
 
 class LauncherError(RuntimeError):
@@ -40,6 +49,13 @@ class PermissionRestore:
     session_id: str
     args: tuple[str, ...]
     description: str
+
+
+@dataclass(frozen=True)
+class SecretReexec:
+    binary: Path
+    arguments: tuple[str, ...]
+    environment: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -806,6 +822,155 @@ def real_binary(tool: str) -> Path:
     return path
 
 
+def load_service_account_token(
+    *,
+    gdbus_binary: Path | None = None,
+    secret_tool_binary: Path | None = None,
+    runner=None,
+) -> str:
+    runner = subprocess.run if runner is None else runner
+    if gdbus_binary is None:
+        discovered = shutil.which("gdbus")
+        if not discovered:
+            raise LauncherError("gdbus not found; refusing interactive 1Password fallback")
+        gdbus_binary = Path(discovered)
+    if secret_tool_binary is None:
+        discovered = shutil.which("secret-tool")
+        if not discovered:
+            raise LauncherError(
+                "secret-tool not found; refusing interactive 1Password fallback"
+            )
+        secret_tool_binary = Path(discovered)
+
+    try:
+        status = runner(
+            [
+                str(gdbus_binary),
+                "call",
+                "--session",
+                "--dest",
+                "org.freedesktop.secrets",
+                "--object-path",
+                "/org/freedesktop/secrets/aliases/default",
+                "--method",
+                "org.freedesktop.DBus.Properties.Get",
+                "org.freedesktop.Secret.Collection",
+                "Locked",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise LauncherError(f"cannot check the system keyring: {exc}") from exc
+    if status.returncode != 0 or "<false>" not in status.stdout:
+        if status.returncode == 0 and "<true>" in status.stdout:
+            raise LauncherError(
+                "system keyring is locked; refusing interactive 1Password fallback"
+            )
+        raise LauncherError(
+            "cannot confirm that the system keyring is unlocked; "
+            "refusing interactive 1Password fallback"
+        )
+
+    try:
+        lookup = runner(
+            [str(secret_tool_binary), "lookup", *KEYRING_ATTRIBUTES],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise LauncherError(f"cannot read the system keyring: {exc}") from exc
+    token = lookup.stdout.strip()
+    if (
+        lookup.returncode != 0
+        or not token.startswith("ops_")
+        or "\n" in token
+        or "\r" in token
+    ):
+        raise LauncherError(
+            "system keyring has an invalid service account token or no token; "
+            "refusing interactive 1Password fallback"
+        )
+    return token
+
+
+def project_env_file(cwd: Path) -> Path | None:
+    directory = cwd.resolve()
+    candidates = (directory, *directory.parents)
+    repository_root = next(
+        (candidate for candidate in candidates if (candidate / ".git").exists()),
+        None,
+    )
+    if repository_root is None:
+        env_file = directory / ".env.op"
+        return env_file if env_file.is_file() else None
+
+    for candidate in candidates:
+        env_file = candidate / ".env.op"
+        if env_file.is_file():
+            return env_file
+        if candidate == repository_root:
+            break
+    return None
+
+
+def project_secret_reexec(
+    arguments: list[str],
+    *,
+    cwd: Path | None = None,
+    environment: dict[str, str] | None = None,
+    op_binary: Path | None = None,
+    launcher_path: Path | None = None,
+    token_loader=load_service_account_token,
+) -> SecretReexec | None:
+    cwd = Path.cwd() if cwd is None else cwd
+    environment = os.environ if environment is None else environment
+    environment[BIOMETRIC_UNLOCK_ENV] = "false"
+
+    if environment.pop(SECRETS_RESOLVED_ENV, None) == "1":
+        environment.pop(SERVICE_ACCOUNT_TOKEN_ENV, None)
+        return None
+
+    env_file = project_env_file(cwd)
+    if env_file is None:
+        return None
+
+    if op_binary is None:
+        discovered = shutil.which("op")
+        if not discovered:
+            raise LauncherError("1Password CLI not found; refusing interactive fallback")
+        op_binary = Path(discovered)
+    if launcher_path is None:
+        launcher_path = Path(__file__).resolve()
+
+    token = token_loader()
+    child_environment = dict(environment)
+    for name in list(child_environment):
+        if name in {"OP_CONNECT_HOST", "OP_CONNECT_TOKEN"} or name.startswith(
+            "OP_SESSION_"
+        ):
+            child_environment.pop(name)
+    child_environment[SERVICE_ACCOUNT_TOKEN_ENV] = token
+    child_environment[BIOMETRIC_UNLOCK_ENV] = "false"
+    child_environment[SECRETS_RESOLVED_ENV] = "1"
+    command = (
+        str(op_binary),
+        "run",
+        f"--env-file={env_file}",
+        "--no-masking",
+        "--",
+        str(launcher_path),
+        *arguments,
+    )
+    return SecretReexec(
+        binary=op_binary,
+        arguments=command,
+        environment=child_environment,
+    )
+
+
 def discover_codex(binary: Path) -> CodexInventory:
     completed = subprocess.run(
         [str(binary), "mcp", "list", "--json"],
@@ -1186,6 +1351,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
+        secret_reexec = project_secret_reexec([tool, *arguments])
+        if secret_reexec is not None:
+            os.execvpe(
+                str(secret_reexec.binary),
+                list(secret_reexec.arguments),
+                secret_reexec.environment,
+            )
+            return 0
         if (
             control.mode == "passthrough"
             and "MCP_LAUNCHER_SELECT" not in os.environ

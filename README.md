@@ -97,6 +97,30 @@ MCP_LAUNCHER_SELECT=none codex --mcp-launcher --version
 MCP_LAUNCHER_SELECT=deepwiki,backlog claude --mcp-launcher --version
 ```
 
+## Project secrets without prompts
+
+When a repository contains `.env.op`, the launcher resolves its 1Password
+references before starting Claude or Codex. Store a read-only 1Password service
+account token in the unlocked GNOME keyring once:
+
+```bash
+secret-tool store --label="1Password service account - Claude and Codex" \
+  application mcp-launcher credential op-service-account
+```
+
+Then add reference-only variables to the repository:
+
+```dotenv
+SERVICE_TOKEN="op://API Keys/example/credential"
+```
+
+Projects using this feature require `op`, `gdbus`, and `secret-tool`. The
+launcher refuses to invoke 1Password when the keyring is locked or unavailable,
+so it cannot fall back to a desktop authorization prompt. It also disables
+biometric unlock and removes the service-account token before starting the
+agent; only the secrets named in `.env.op` reach that process. Nested folders
+inherit the nearest `.env.op` within their Git repository.
+
 ## Resume with original permissions
 
 Use the CLIs' normal resume commands:

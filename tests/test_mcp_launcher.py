@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 
 LIB_DIR = Path(__file__).resolve().parents[1]
@@ -788,6 +789,194 @@ class ClaudeTests(unittest.TestCase):
         self.assertEqual(local_settings["disabledMcpjsonServers"], ["playwright"])
         self.assertEqual(stat.S_IMODE(local_settings_path.stat().st_mode), 0o600)
         self.assertNotIn("playwright", claude_current_selection(self.home, inventory))
+
+
+class ProjectSecretLaunchTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.home = self.root / "home"
+        self.cwd = self.root / "project"
+        self.home.mkdir()
+        self.cwd.mkdir()
+        (self.cwd / ".git").mkdir()
+        (self.cwd / ".env.op").write_text(
+            'CLOUDFLARE_TOKEN="op://API Keys/cloudflare/credential"\n'
+        )
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def subject(self, environment=None, token_loader=None, cwd=None):
+        function = getattr(mcp_launcher, "project_secret_reexec", None)
+        self.assertIsNotNone(function, "project_secret_reexec must be implemented")
+        return function(
+            ["codex", "--version"],
+            cwd=self.cwd if cwd is None else cwd,
+            environment={} if environment is None else environment,
+            op_binary=Path("/usr/bin/op"),
+            launcher_path=Path("/usr/bin/mcp-launcher"),
+            token_loader=(lambda: "ops_service-account-secret")
+            if token_loader is None
+            else token_loader,
+        )
+
+    def test_locked_keyring_fails_before_secret_tool_can_prompt(self):
+        runner = mock.Mock(return_value=mock.Mock(returncode=0, stdout="(<true>,)\n"))
+
+        with self.assertRaisesRegex(LauncherError, "keyring is locked"):
+            mcp_launcher.load_service_account_token(
+                gdbus_binary=Path("/usr/bin/gdbus"),
+                secret_tool_binary=Path("/usr/bin/secret-tool"),
+                runner=runner,
+            )
+
+        self.assertEqual(runner.call_count, 1)
+
+    def test_unlocked_keyring_returns_service_account_token(self):
+        runner = mock.Mock(
+            side_effect=[
+                mock.Mock(returncode=0, stdout="(<false>,)\n", stderr=""),
+                mock.Mock(
+                    returncode=0,
+                    stdout="ops_service-account-secret\n",
+                    stderr="",
+                ),
+            ]
+        )
+
+        token = mcp_launcher.load_service_account_token(
+            gdbus_binary=Path("/usr/bin/gdbus"),
+            secret_tool_binary=Path("/usr/bin/secret-tool"),
+            runner=runner,
+        )
+
+        self.assertEqual(token, "ops_service-account-secret")
+        self.assertEqual(
+            runner.call_args_list[1].args[0],
+            [
+                "/usr/bin/secret-tool",
+                "lookup",
+                "application",
+                "mcp-launcher",
+                "credential",
+                "op-service-account",
+            ],
+        )
+
+    def test_invalid_keyring_value_is_rejected(self):
+        runner = mock.Mock(
+            side_effect=[
+                mock.Mock(returncode=0, stdout="(<false>,)\n", stderr=""),
+                mock.Mock(returncode=0, stdout="not-a-service-token\n", stderr=""),
+            ]
+        )
+
+        with self.assertRaisesRegex(LauncherError, "invalid service account token"):
+            mcp_launcher.load_service_account_token(
+                gdbus_binary=Path("/usr/bin/gdbus"),
+                secret_tool_binary=Path("/usr/bin/secret-tool"),
+                runner=runner,
+            )
+
+    def test_service_account_reexecs_once_without_putting_token_in_arguments(self):
+        environment = {
+            "OP_CONNECT_HOST": "https://connect.example",
+            "OP_CONNECT_TOKEN": "connect-secret",
+            "OP_SESSION_work": "interactive-session",
+        }
+
+        launch = self.subject(environment)
+
+        self.assertEqual(launch.binary, Path("/usr/bin/op"))
+        self.assertEqual(
+            launch.arguments,
+            (
+                "/usr/bin/op",
+                "run",
+                f"--env-file={self.cwd / '.env.op'}",
+                "--no-masking",
+                "--",
+                "/usr/bin/mcp-launcher",
+                "codex",
+                "--version",
+            ),
+        )
+        self.assertNotIn("ops_service-account-secret", launch.arguments)
+        self.assertEqual(
+            launch.environment["OP_SERVICE_ACCOUNT_TOKEN"],
+            "ops_service-account-secret",
+        )
+        self.assertEqual(
+            launch.environment["MCP_LAUNCHER_SECRETS_RESOLVED"],
+            "1",
+        )
+        self.assertEqual(
+            launch.environment["OP_BIOMETRIC_UNLOCK_ENABLED"],
+            "false",
+        )
+        self.assertNotIn("OP_CONNECT_HOST", launch.environment)
+        self.assertNotIn("OP_CONNECT_TOKEN", launch.environment)
+        self.assertNotIn("OP_SESSION_work", launch.environment)
+
+    def test_resolved_reexec_removes_service_token_before_agent_launch(self):
+        environment = {
+            "OP_SERVICE_ACCOUNT_TOKEN": "ops_service-account-secret",
+            "MCP_LAUNCHER_SECRETS_RESOLVED": "1",
+            "CLOUDFLARE_TOKEN": "resolved-cloudflare-secret",
+        }
+
+        launch = self.subject(environment)
+
+        self.assertIsNone(launch)
+        self.assertNotIn("OP_SERVICE_ACCOUNT_TOKEN", environment)
+        self.assertNotIn("MCP_LAUNCHER_SECRETS_RESOLVED", environment)
+        self.assertEqual(environment["OP_BIOMETRIC_UNLOCK_ENABLED"], "false")
+        self.assertEqual(
+            environment["CLOUDFLARE_TOKEN"],
+            "resolved-cloudflare-secret",
+        )
+
+    def test_nested_working_directory_uses_repository_env_file(self):
+        nested = self.cwd / "apps/web"
+        nested.mkdir(parents=True)
+
+        launch = self.subject(cwd=nested)
+
+        self.assertIn(f"--env-file={self.cwd / '.env.op'}", launch.arguments)
+
+    def test_project_without_env_op_never_uses_onepassword(self):
+        (self.cwd / ".env.op").unlink()
+        token_loader = mock.Mock(side_effect=AssertionError("must not read keyring"))
+        environment = {}
+
+        self.assertIsNone(self.subject(environment, token_loader=token_loader))
+        token_loader.assert_not_called()
+        self.assertEqual(environment["OP_BIOMETRIC_UNLOCK_ENABLED"], "false")
+
+    def test_main_reexecs_through_unattended_secret_loader_before_agent(self):
+        reexec = mcp_launcher.SecretReexec(
+            binary=Path("/usr/bin/op"),
+            arguments=("/usr/bin/op", "run", "--", "/launcher", "codex"),
+            environment={"OP_SERVICE_ACCOUNT_TOKEN": "service-account-secret"},
+        )
+        with (
+            mock.patch.object(
+                mcp_launcher,
+                "project_secret_reexec",
+                return_value=reexec,
+            ) as prepare,
+            mock.patch.object(mcp_launcher.os, "execvpe") as execute,
+        ):
+            result = mcp_launcher.main(["codex", "--version"])
+
+        self.assertEqual(result, 0)
+        prepare.assert_called_once_with(["codex", "--version"])
+        execute.assert_called_once_with(
+            "/usr/bin/op",
+            ["/usr/bin/op", "run", "--", "/launcher", "codex"],
+            reexec.environment,
+        )
 
 
 if __name__ == "__main__":
