@@ -11,6 +11,12 @@ For example, select only DeepWiki as your default. Your next plain launch uses
 DeepWiki and disables the other discovered MCPs. You can open a picker whenever
 you need a different set for a project.
 
+![Mock example: save DeepWiki as the default, then run Claude with no extra flag.](docs/images/default-demo.svg)
+
+*Example with mock servers and a demo client, using the real launcher.
+The first command selects DeepWiki without opening the picker. Codex uses the
+same controls; replace `claude` with `codex`.*
+
 ## Install and choose your defaults
 
 You need Python 3.11+, Git, Make, Bash or Zsh, and at least one of Claude Code
@@ -206,5 +212,8 @@ Checks cover argument handling, defaults, folder choices, session permissions,
 and installation/removal in a temporary home with test CLI programs. For a real
 wrapper check after installation, run `claude --version` or `codex --version`.
 This checks selection and CLI startup; it does not test requests to each MCP server.
+
+Regenerate the mock example with `python3 docs/images/generate_demo.py`.
+It uses a temporary home and never reads your client settings or credentials.
 
 [MIT license](LICENSE).
