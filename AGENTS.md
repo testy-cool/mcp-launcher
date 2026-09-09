@@ -3,9 +3,9 @@
 ## Purpose
 
 This repository provides one dependency-light launcher for Claude Code and
-Codex CLI. Plain invocations pass through without MCP discovery or selection;
-`--mcp-launcher` and the other explicit `--mcp-*` controls opt into MCP
-management. The picker stays in a saved preference order. Resumed sessions
+Codex CLI. Plain invocations apply the saved tool default without a picker;
+`--mcp-launcher` and the other explicit `--mcp-*` controls override the automatic
+default. The picker stays in a saved preference order. Resumed sessions
 recover their first recorded permission state when the native session can be
 resolved before launch. All ordinary CLI arguments must pass through unchanged.
 
@@ -21,7 +21,7 @@ Keep the project a small Python 3.11+ standard-library program with POSIX shell 
 - `tests/test_mcp_launcher.py`: unit coverage for argument parsing, discovery,
   selection, ordering, resume permission recovery, and state mutation.
 - `tests/test_install.sh`: isolated temporary-HOME smoke test for dry-run safety,
-  installation, real-binary discovery, plain-command bypass, explicit picker
+  installation, real-binary discovery, plain-command defaults, explicit picker
   activation, argument passthrough, resume permission recovery, default and
   per-folder selection precedence, idempotency, and uninstall.
 - `tests/test_doctor.sh`: verifies that `make doctor` accepts either supported CLI and rejects a machine with neither.
@@ -32,9 +32,9 @@ Keep the project a small Python 3.11+ standard-library program with POSIX shell 
 
 1. Shell functions installed in `.zshrc` or `.bashrc` call `mcp-launcher claude ...` or `mcp-launcher codex ...`.
 2. The launcher resolves the real binary from `PATH`, with `MCP_LAUNCHER_REAL_CLAUDE` and `MCP_LAUNCHER_REAL_CODEX` as explicit overrides. It must reject resolution back to itself.
-3. Plain invocations exec the real CLI without MCP discovery or state access.
-   `--mcp-launcher`, any explicit selection control, or
-   `MCP_LAUNCHER_SELECT` opts into MCP management.
+3. Plain invocations apply the saved tool default without a picker, overriding
+   folder selections; an unset default disables all discovered MCPs.
+   Explicit selection controls and `MCP_LAUNCHER_SELECT` override this behavior.
 4. Claude MCPs are discovered from `~/.claude.json` plus `.mcp.json` files from the current directory through its ancestors. The selection is applied through Claude's project-scoped disabled-server lists, including `.claude/settings.local.json` for `.mcp.json` servers.
 5. Codex MCPs are discovered with `codex mcp list --json` and ordered using `~/.codex/config.toml` when available. Selection is passed only to the launched process through `-c mcp_servers.<name>...` overrides.
 6. Exact/named resumes, Claude `--continue`, and Codex `resume --last` read the

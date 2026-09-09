@@ -586,10 +586,10 @@ class PreferenceTests(unittest.TestCase):
 
 
 class WrapperArgumentTests(unittest.TestCase):
-    def test_normal_invocation_bypasses_mcp_management(self):
+    def test_normal_invocation_uses_saved_default(self):
         control, passthrough = parse_wrapper_args(["--model", "opus"])
 
-        self.assertEqual(control.mode, "passthrough")
+        self.assertEqual(control.mode, "use_default")
         self.assertEqual(passthrough, ["--model", "opus"])
 
     def test_mcp_launcher_control_opens_picker_and_is_not_forwarded(self):
@@ -656,7 +656,7 @@ class WrapperArgumentTests(unittest.TestCase):
         self.assertIn("per folder", output.getvalue())
         self.assertIn("--mcp-launcher", output.getvalue())
         self.assertIn(
-            "Plain claude and codex invocations skip MCP management",
+            "Plain claude and codex invocations use the saved tool default",
             output.getvalue(),
         )
 

@@ -49,16 +49,17 @@ grep -q '^export KEEP_ME=yes$' "$shell_rc"
     "$prefix/bin/mcp-launcher" claude --version \
       > "$tmp_dir/launch.log" 2> "$tmp_dir/launch.err")
 grep -q '^fake-claude:--version$' "$tmp_dir/launch.log"
-test ! -s "$tmp_dir/launch.err"
-test ! -e "$home_dir/.config/mcp-launcher/state.json"
+grep -q "^claude MCPs (0/" "$tmp_dir/launch.err"
+test -e "$home_dir/.config/mcp-launcher/state.json"
 
 (cd "$tmp_dir" && \
   HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \
     "$prefix/bin/mcp-launcher" codex --version \
       > "$tmp_dir/codex-plain.log" 2> "$tmp_dir/codex-plain.err")
-grep -q '^fake-codex:--version$' "$tmp_dir/codex-plain.log"
-test ! -s "$tmp_dir/codex-plain.err"
-test ! -e "$home_dir/.config/mcp-launcher/state.json"
+grep -q 'mcp_servers.deepwiki.enabled=false' "$tmp_dir/codex-plain.log"
+grep -q 'mcp_servers.backlog.enabled=false' "$tmp_dir/codex-plain.log"
+grep -q "^codex MCPs (0/" "$tmp_dir/codex-plain.err"
+test -e "$home_dir/.config/mcp-launcher/state.json"
 
 # Defaults seed unseen folders, while an exact folder keeps the selection it was given.
 mkdir -p "$tmp_dir/project-a" "$tmp_dir/project-b"
@@ -84,7 +85,7 @@ grep -q '^claude MCPs (0/' "$tmp_dir/missing-default.err"
 
 (cd "$tmp_dir/project-b" && \
   HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \
-    "$prefix/bin/mcp-launcher" codex --mcp-last --version > "$tmp_dir/project-b.log")
+    "$prefix/bin/mcp-launcher" codex --version > "$tmp_dir/project-b.log")
 grep -q 'mcp_servers.deepwiki.enabled=false' "$tmp_dir/project-b.log"
 grep -q 'mcp_servers.backlog.enabled=true' "$tmp_dir/project-b.log"
 
@@ -96,7 +97,7 @@ grep -q 'mcp_servers.backlog.enabled=false' "$tmp_dir/project-a-last.log"
 
 (cd "$tmp_dir/project-a" && \
   HOME="$home_dir" PATH="$fake_bin:/usr/bin:/bin" \
-    "$prefix/bin/mcp-launcher" codex --mcp-use-default --version \
+    "$prefix/bin/mcp-launcher" codex --version \
       > "$tmp_dir/project-a-default.log")
 grep -q 'mcp_servers.deepwiki.enabled=false' "$tmp_dir/project-a-default.log"
 grep -q 'mcp_servers.backlog.enabled=true' "$tmp_dir/project-a-default.log"

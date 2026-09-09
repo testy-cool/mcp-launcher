@@ -97,7 +97,7 @@ def managed_claude_names(names: list[str]) -> list[str]:
 
 
 def parse_wrapper_args(args: list[str]) -> tuple[Control, list[str]]:
-    mode = "passthrough"
+    mode = "use_default"
     refresh = False
     passthrough: list[str] = []
     controls = {
@@ -120,7 +120,7 @@ def parse_wrapper_args(args: list[str]) -> tuple[Control, list[str]]:
             mode = controls[arg]
         elif parsing_controls and arg == "--mcp-refresh":
             refresh = True
-            if mode == "passthrough":
+            if mode == "use_default":
                 mode = "prompt"
         else:
             passthrough.append(arg)
@@ -1210,12 +1210,12 @@ def show_help() -> None:
   --mcp-refresh   refresh Claude.ai-managed connector discovery before picking
   --mcp-help      show this help
 
-Plain claude and codex invocations skip MCP management and launch normally.
+Plain claude and codex invocations use the saved tool default without a picker.
 Use --mcp-launcher to open the picker and remember its selection per folder.
 All other arguments are forwarded unchanged.
 Exact/named resumes, Claude --continue, and Codex resume --last restore the
 session's first recorded permission state unless explicit permission flags win.
-For automation, setting MCP_LAUNCHER_SELECT opts in and accepts all, none, or
+For automation, MCP_LAUNCHER_SELECT overrides the selection and accepts all, none, or
 comma-separated names.
 """
     )
@@ -1273,7 +1273,7 @@ def run_claude(control: Control, passthrough: list[str], state: dict) -> None:
     )
     selected = (
         configured_default_selection(state, "claude", ordered)
-        if control.mode == "use_default"
+        if control.mode == "use_default" and "MCP_LAUNCHER_SELECT" not in os.environ
         else choose_selection(control, ordered, current, "claude")
     )
     if control.mode == "default":
@@ -1316,7 +1316,7 @@ def run_codex(control: Control, passthrough: list[str], state: dict) -> None:
 
     selected = (
         configured_default_selection(state, "codex", ordered)
-        if control.mode == "use_default"
+        if control.mode == "use_default" and "MCP_LAUNCHER_SELECT" not in os.environ
         else choose_selection(control, ordered, current, "codex")
     )
     if control.mode == "default":
@@ -1358,12 +1358,6 @@ def main(argv: list[str] | None = None) -> int:
                 list(secret_reexec.arguments),
                 secret_reexec.environment,
             )
-            return 0
-        if (
-            control.mode == "passthrough"
-            and "MCP_LAUNCHER_SELECT" not in os.environ
-        ):
-            run_passthrough(tool, passthrough)
             return 0
         state = load_state()
         if tool == "claude":

@@ -3,7 +3,8 @@
 Choose which MCP servers Claude Code and Codex CLI start, and resume sessions
 with the permissions they originally used.
 
-Running `claude` or `codex` starts the real CLI normally. Add
+Running `claude` or `codex` automatically applies the saved tool default without a picker.
+With no saved default, all discovered MCPs are disabled. Add
 `--mcp-launcher` when you want the MCP checklist:
 
 ```bash
@@ -146,11 +147,11 @@ is not known until after the launcher has exited.
 
 ## How selection works
 
-- Plain `claude` and `codex` invocations bypass MCP discovery and state updates.
+- Plain `claude` and `codex` invocations apply the saved tool default, overriding remembered folder selections.
   Permission-preserving resume still applies when resuming a native session.
 - `--mcp-launcher` opts into the picker. Any explicit `--mcp-*` selection
-  control also opts into MCP management without requiring the picker flag.
-- Both tools remember selected MCP names by exact resolved working directory. A remembered folder selection takes precedence over the tool default; without either, the launcher's previous native/current behavior is preserved.
+  control overrides the automatic default without requiring the picker flag.
+- Both tools remember selected MCP names by exact resolved working directory. With `--mcp-launcher` or `--mcp-last`, a remembered folder selection takes precedence over the tool default; without either, the launcher's previous native/current behavior is preserved.
 - `--mcp-use-default` bypasses the picker and any remembered folder choice, launches with the saved tool default, and remembers that choice for the folder. If no default has been configured, it launches with every discovered MCP disabled.
 - Claude also applies the choice through its native per-project `disabledMcpServers` and `disabledMcpjsonServers` state. Claude.ai connectors remain available in the picker, and running sessions are not modified.
 - Codex receives launch-scoped `mcp_servers.<name>.enabled` overrides. Plugin-contributed MCPs are supported without disabling the rest of their plugin.
