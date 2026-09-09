@@ -1,230 +1,210 @@
 # MCP Launcher
 
-Choose which MCP servers Claude Code and Codex CLI start, and resume sessions
-with the permissions they originally used.
+**Choose your MCP tools once. Use Claude Code and Codex as usual.**
 
-Running `claude` or `codex` automatically applies the saved tool default without a picker.
-With no saved default, all discovered MCPs are disabled. Add
-`--mcp-launcher` when you want the MCP checklist:
+MCP servers give coding agents extra tools, such as documentation search.
+MCP Launcher lets you choose which of your configured servers to enable.
+It saves a separate default for Claude Code and Codex, then applies it whenever
+you run `claude` or `codex`. No extra flag or menu each time.
 
-```bash
-claude --mcp-launcher
-codex --mcp-launcher --yolo
-```
+For example, select only DeepWiki as your default. Your next plain launch uses
+DeepWiki and disables the other discovered MCPs. You can open a picker whenever
+you need a different set for a project.
 
-This is useful when every agent session would otherwise start its own copy of resource-heavy MCP servers.
+## Install and choose your defaults
 
-## Install
-
-Requirements:
-
-- Python 3.11 or newer
-- Claude Code and/or Codex CLI available on `PATH`
-- Zsh or Bash
-- [`gum`](https://github.com/charmbracelet/gum) is optional; without it, the launcher uses a plain numbered picker
-
-Clone the repo and run the checked installer:
+You need Python 3.11+, Git, Make, Bash or Zsh, and at least one of Claude Code
+or Codex CLI installed. Configure your MCP servers in that client first;
+this tool selects servers but does not install them.
 
 ```bash
 git clone https://github.com/testy-cool/mcp-launcher.git
 cd mcp-launcher
 make doctor
+```
+
+For **Zsh**:
+
+```bash
 make install
 source ~/.zshrc
 ```
 
-Choose your default MCPs once for each client you use:
-
-```bash
-claude --mcp-default
-codex --mcp-default
-```
-
-These defaults apply to every plain launch. After updating, existing native or
-folder selections are not automatically imported as defaults. Until you set a
-default, plain launches disable all discovered MCPs and show a setup hint.
-Saving an empty default intentionally disables all MCPs without that hint.
-
-For Bash, install into `.bashrc` instead:
+For **Bash**:
 
 ```bash
 make install SHELL_RC="$HOME/.bashrc"
 source ~/.bashrc
 ```
 
-The installer places the launcher under `~/.local`, adds small `claude` and `codex` functions to your shell startup file, and preserves everything outside its marked block. Running it again updates the launcher without duplicating the shell configuration.
-
-Preview every change without writing anything:
+Choose defaults for each client you use. Skip the other command if you only
+use one client:
 
 ```bash
-make dry-run
+claude --mcp-default
+codex --mcp-default
 ```
 
-## Use
+With optional [gum](https://github.com/charmbracelet/gum) installed, press Space
+to select servers and Enter to save. Without gum, enter server numbers separated
+by commas. Each command saves your choices and exits.
 
-Run either CLI normally to apply its saved default without a picker:
+Now run your usual commands, in any folder:
 
 ```bash
 claude
-codex --yolo
+codex
 ```
 
-Open the picker only when you want to manage MCPs:
+**Until you save a default, plain launches disable all discovered MCPs** and
+show a setup hint. Existing client settings and saved folder choices are not
+imported as defaults when you update. An intentionally empty default keeps all
+MCPs disabled without showing the hint.
+
+The installer adds shell functions to your startup file and installs under
+`~/.local`. It preserves the rest of your shell configuration. Run `make dry-run`
+to preview installation without changing anything.
+
+## Change tools for a project
+
+Open the picker and launch with your selection:
 
 ```bash
 claude --mcp-launcher
 codex --mcp-launcher
 ```
 
-Press Space to enable or disable an MCP, then Enter to launch. The launcher
-remembers that selection for the exact folder you launched from and always
-displays MCPs in your saved preference order. A folder without a remembered
-selection starts from the tool's default when one has been set.
-
-Launcher-only controls are removed before the real CLI receives its arguments:
+The picker remembers your choice for that folder. To use it again without a menu:
 
 ```bash
-claude --mcp-launcher    # open the MCP picker, remember, then launch
-codex --mcp-launcher
-
-claude --mcp-order       # set the preferred MCP order
-codex --mcp-order
-
-claude --mcp-default     # pick the default for every plain launch, then exit
-codex --mcp-default
-
-claude --mcp-use-default # launch with the saved default, without a picker
-codex --mcp-use-default
-
-claude --mcp-last        # reuse this folder's selection, or the default
-claude --mcp-none        # launch with no discovered MCPs
-claude --mcp-all         # launch with every discovered MCP
-claude --mcp-refresh     # refresh Claude.ai-managed connectors
-claude --mcp-help        # show all launcher controls
+claude --mcp-last
+codex --mcp-last
 ```
 
-For scripts and automation:
+Plain `claude` and `codex` still use your global defaults. They do not erase
+saved folder choices. Defaults are separate for the two clients.
+
+These controls work with either client:
+
+| Control | What it does |
+| --- | --- |
+| `--mcp-default` | Choose the default for every plain launch, then exit. |
+| `--mcp-launcher` | Pick servers, save the folder choice, and launch. |
+| `--mcp-last` | Use the saved folder choice, or the default if none exists. |
+| `--mcp-none` | Disable all discovered MCPs for this launch and save that folder choice. |
+| `--mcp-all` | Enable all discovered MCPs and save that folder choice. |
+| `--mcp-use-default` | Use the default and also save it as the folder choice. |
+| `--mcp-order` | Change the saved picker order, then exit. |
+| `--mcp-refresh` | Refresh Claude.ai connector discovery and open the picker. |
+| `--mcp-help` | Show launcher help. |
+
+Other arguments pass through to the real CLI. Running sessions are not changed.
+
+For scripts, `MCP_LAUNCHER_SELECT` overrides the selection. It accepts `all`,
+`none`, or comma-separated names of servers you have already configured:
 
 ```bash
-MCP_LAUNCHER_SELECT=none codex --mcp-launcher --version
-MCP_LAUNCHER_SELECT=deepwiki,backlog claude --mcp-launcher --version
+MCP_LAUNCHER_SELECT=none codex --version
 ```
 
-## Project secrets without prompts
+## Resume a session
 
-When a repository contains `.env.op`, the launcher resolves its 1Password
-references before starting Claude or Codex. Store a read-only 1Password service
-account token in the unlocked GNOME keyring once:
+Use your normal resume command, such as `claude --continue` or
+`codex resume --last`. When the launcher can identify the saved session, it
+restores that session's first recorded permission settings. Permission flags you
+supply yourself take precedence. This can restore unrestricted permissions if
+that is how the session began.
+
+Exact session IDs and names are supported too. If the CLI opens its own session
+picker, the launcher cannot know which session you will choose, so it leaves
+permission settings alone.
+
+## Settings and privacy
+
+Preferences live in `~/.config/mcp-launcher/state.json`. Use the commands above
+to change them. The file stores server names, picker order, defaults, and folder
+paths; it is readable and writable only by your user account.
+
+The launcher reads your existing MCP configuration. It does not copy credentials,
+server definitions, or session transcripts into its preference file.
+
+- **Claude:** selection updates Claude's settings for the current project.
+  Those settings can also affect later launches outside this wrapper.
+- **Codex:** selection is passed as command-line settings for that launch.
+- **Resume:** permission settings are read from the client's own session files.
+
+### Optional: project secrets from 1Password
+
+On systems with an unlocked GNOME keyring, a project can use a `.env.op` file
+with 1Password references. This requires `op`, `gdbus`, `secret-tool`, and a
+read-only 1Password service account.
+
+Store the service account token in the keyring using this command, then enter
+the token at its prompt:
 
 ```bash
 secret-tool store --label="1Password service account - Claude and Codex" \
   application mcp-launcher credential op-service-account
 ```
 
-Then add reference-only variables to the repository:
+Use references in `.env.op`, not real secret values. For example, replace this
+placeholder with a reference from your vault:
 
 ```dotenv
-SERVICE_TOKEN="op://API Keys/example/credential"
+SERVICE_TOKEN="op://Example Vault/Example Item/credential"
 ```
 
-Projects using this feature require `op`, `gdbus`, and `secret-tool`. The
-launcher refuses to invoke 1Password when the keyring is locked or unavailable,
-so it cannot fall back to a desktop authorization prompt. It also disables
-biometric unlock and removes the service-account token before starting the
-agent; only the secrets named in `.env.op` reach that process. Nested folders
-inherit the nearest `.env.op` within their Git repository.
+The launcher uses the nearest `.env.op` within the Git repository. It stops if
+the keyring is locked or unavailable. It removes the service account token before
+starting the agent; the resolved project secrets are available to that process.
+Do not commit real tokens or private vault references to a public repository.
 
-## Resume with original permissions
+## Bypass, update, or remove
 
-Use the CLIs' normal resume commands:
-
-```bash
-claude --resume <session-id-or-name>
-claude --continue
-codex resume <session-id-or-name>
-codex resume --last
-```
-
-For an exact or named resume, the launcher finds the native Claude/Codex
-transcript. For `claude --continue` and `codex resume --last`, it finds the most
-recent native session for the current folder. It then passes the first recorded
-permission mode back to the real CLI. Codex sandboxed sessions also recover the
-recorded approval policy and workspace network setting when available.
-
-Permission flags supplied on the resume command take precedence. For Codex,
-that precedence is per setting: an explicit sandbox can still be paired with
-the session's original approval policy. A bare resume command that opens the
-CLI's interactive session picker is left untouched because the selected session
-is not known until after the launcher has exited.
-
-## How selection works
-
-- Plain `claude` and `codex` invocations apply the saved tool default without replacing remembered folder selections. Use `--mcp-last` to reuse a folder choice.
-  Permission-preserving resume still applies when resuming a native session.
-- `--mcp-launcher` opts into the picker. Any explicit `--mcp-*` selection
-  control overrides the automatic default without requiring the picker flag.
-- Both tools remember selected MCP names by exact resolved working directory. With `--mcp-launcher` or `--mcp-last`, a remembered folder selection takes precedence over the tool default; without either, the launcher's previous native/current behavior is preserved.
-- `--mcp-use-default` bypasses the picker and any remembered folder choice, launches with the saved tool default, and remembers that choice for the folder. If no default has been configured, it launches with every discovered MCP disabled.
-- Claude also applies the choice through its native per-project `disabledMcpServers` and `disabledMcpjsonServers` state. Claude.ai connectors remain available in the picker, and running sessions are not modified.
-- Codex receives launch-scoped `mcp_servers.<name>.enabled` overrides. Plugin-contributed MCPs are supported without disabling the rest of their plugin.
-- MCP definitions, OAuth data, headers, credentials, transcripts, and permission
-  metadata are never copied into launcher state. Resume metadata is read directly
-  from the CLIs' native files at launch time.
-- Defaults, per-folder selections, and picker preferences live in `~/.config/mcp-launcher/state.json` with mode `0600`.
-
-To bypass the installed shell functions, including if MCP discovery fails:
+If discovery fails, or you want to skip the installed shell functions:
 
 ```bash
 command claude
 command codex
 ```
 
-This starts the native CLI with its native settings, without launcher MCP
-selection or permission recovery. Native help/version commands also work this way.
+These run the native client with its own settings, without launcher selection,
+secret loading, or permission recovery. You can also use them for native help
+and version commands.
 
-## Update or uninstall
-
-Update from the checkout:
+Update from your checkout:
 
 ```bash
 git pull --ff-only
 make install
 ```
 
-Uninstall while keeping preferences:
+For Bash, add `SHELL_RC="$HOME/.bashrc"` to install and uninstall commands.
+Remove the launcher while keeping preferences:
 
 ```bash
 make uninstall
 ```
 
-Remove preferences too:
+To delete preferences too, use `./uninstall.sh --purge` (add
+`--shell-rc "$HOME/.bashrc"` for Bash).
 
-```bash
-./uninstall.sh --purge
-```
-
-## Custom installation paths
-
-```bash
-make install PREFIX="$HOME/.local" SHELL_RC="$HOME/.zshrc"
-```
-
-The equivalent direct command is:
-
-```bash
-./install.sh --prefix "$HOME/.local" --shell-rc "$HOME/.zshrc"
-```
+For a custom location, set `PREFIX` and `SHELL_RC` on the Make command, and use
+the same values when updating or removing the launcher.
 
 ## Development
 
+The launcher uses Python's standard library, with no Python packages to install.
+
 ```bash
-make check    # unit tests, shell syntax, and isolated install smoke test
-make doctor   # verify Python, Claude, Codex, and optional gum
-make dry-run  # preview installation
+make check
+make doctor
+make dry-run
 ```
 
-The install smoke test uses a temporary HOME and fake Claude/Codex binaries. It
-verifies dry-run safety, PATH-based binary discovery, idempotent installation,
-plain-command bypass, explicit picker activation, argument passthrough,
-original-permission resume, default and per-folder selection precedence, clean
-uninstall, and preference preservation.
+Checks cover argument handling, defaults, folder choices, session permissions,
+and installation/removal in a temporary home with test CLI programs. For a real
+wrapper check after installation, run `claude --version` or `codex --version`.
+This checks selection and CLI startup; it does not test requests to each MCP server.
+
+[MIT license](LICENSE).
