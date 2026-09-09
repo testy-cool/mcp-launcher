@@ -11,11 +11,12 @@ For example, select only DeepWiki as your default. Your next plain launch uses
 DeepWiki and disables the other discovered MCPs. You can open a picker whenever
 you need a different set for a project.
 
-![Mock example: save DeepWiki as the default, then run Claude with no extra flag.](docs/images/default-demo.svg)
+![Real terminal recording: select DeepWiki in the picker, save it, then launch Claude normally.](docs/images/default-demo.gif)
 
-*Example with mock servers and a demo client, using the real launcher.
-The first command selects DeepWiki without opening the picker. Codex uses the
-same controls; replace `claude` with `codex`.*
+*Recorded in Kitty with the real launcher and gum picker. The three MCP servers
+and the client are test fixtures; no account or live MCP connection is used.
+[View a still screenshot of the picker](docs/images/picker.png).
+Codex uses the same controls; replace `claude` with `codex`.*
 
 ## Install and choose your defaults
 
@@ -213,7 +214,9 @@ and installation/removal in a temporary home with test CLI programs. For a real
 wrapper check after installation, run `claude --version` or `codex --version`.
 This checks selection and CLI startup; it does not test requests to each MCP server.
 
-Regenerate the mock example with `python3 docs/images/generate_demo.py`.
-It uses a temporary home and never reads your client settings or credentials.
+Record the demo with `python3 docs/images/generate_demo.py` on Linux.
+Recording requires Kitty, Xvfb, xdotool, ffmpeg, and gum. These tools are only
+needed to make the GIF, not to use the launcher. The script uses a separate
+virtual display and temporary home, without your settings or credentials.
 
 [MIT license](LICENSE).
