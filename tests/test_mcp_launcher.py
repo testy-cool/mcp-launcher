@@ -592,6 +592,40 @@ class WrapperArgumentTests(unittest.TestCase):
         self.assertEqual(control.mode, "use_default")
         self.assertEqual(passthrough, ["--model", "opus"])
 
+    def test_plain_launch_preserves_folder_memory_for_both_tools(self):
+        for tool in ("claude", "codex"):
+            with self.subTest(tool=tool), tempfile.TemporaryDirectory() as folder:
+                home = Path(folder)
+                (home / ".claude.json").write_text(json.dumps({
+                    "mcpServers": {"deepwiki": {}, "backlog": {}}
+                }))
+                state = load_state(home / "missing.json")
+                state["defaults"][tool] = ["deepwiki"]
+                cwd_key = str(Path.cwd().resolve())
+                state["selections"][tool][cwd_key] = ["backlog"]
+                control, args = parse_wrapper_args(["--version"])
+                with mock.patch.object(Path, "home", return_value=home), \
+                     mock.patch.object(mcp_launcher, "real_binary", return_value=Path("/bin/true")), \
+                     mock.patch.object(mcp_launcher, "save_state"), \
+                     mock.patch.object(mcp_launcher, "apply_claude_selection"), \
+                     mock.patch.object(mcp_launcher, "discover_codex") as discovery, \
+                     mock.patch.object(mcp_launcher, "restore_resume_permissions", return_value=None), \
+                     mock.patch.object(mcp_launcher.os, "execvpe"), \
+                     mock.patch.dict(os.environ, {}, clear=True):
+                    discovery.return_value = mock.Mock(
+                        names=["deepwiki", "backlog"], enabled={"backlog"},
+                        standalone_transports={}
+                    )
+                    getattr(mcp_launcher, "run_" + tool)(control, args, state)
+                self.assertEqual(state["selections"][tool][cwd_key], ["backlog"])
+
+    def test_missing_default_hint_distinguishes_empty_default(self):
+        for defaults, expected in (({}, True), ({"codex": []}, False)):
+            output = io.StringIO()
+            with mock.patch("sys.stderr", output):
+                mcp_launcher.report_missing_default({"defaults": defaults}, "codex")
+            self.assertEqual("--mcp-default" in output.getvalue(), expected)
+
     def test_mcp_launcher_control_opens_picker_and_is_not_forwarded(self):
         control, passthrough = parse_wrapper_args(
             ["--mcp-launcher", "--model", "opus"]
@@ -652,7 +686,7 @@ class WrapperArgumentTests(unittest.TestCase):
         self.assertIn("--mcp-use-default", output.getvalue())
         self.assertIn("without opening the picker", output.getvalue())
         self.assertIn("all MCPs disabled", output.getvalue())
-        self.assertIn("new folders", output.getvalue())
+        self.assertIn("every plain launch", output.getvalue())
         self.assertIn("per folder", output.getvalue())
         self.assertIn("--mcp-launcher", output.getvalue())
         self.assertIn(

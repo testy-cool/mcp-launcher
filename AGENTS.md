@@ -33,7 +33,8 @@ Keep the project a small Python 3.11+ standard-library program with POSIX shell 
 1. Shell functions installed in `.zshrc` or `.bashrc` call `mcp-launcher claude ...` or `mcp-launcher codex ...`.
 2. The launcher resolves the real binary from `PATH`, with `MCP_LAUNCHER_REAL_CLAUDE` and `MCP_LAUNCHER_REAL_CODEX` as explicit overrides. It must reject resolution back to itself.
 3. Plain invocations apply the saved tool default without a picker, overriding
-   folder selections; an unset default disables all discovered MCPs.
+   folder selections for that launch without replacing saved folder choices;
+   an unset default disables all discovered MCPs and shows setup guidance.
    Explicit selection controls and `MCP_LAUNCHER_SELECT` override this behavior.
 4. Claude MCPs are discovered from `~/.claude.json` plus `.mcp.json` files from the current directory through its ancestors. The selection is applied through Claude's project-scoped disabled-server lists, including `.claude/settings.local.json` for `.mcp.json` servers.
 5. Codex MCPs are discovered with `codex mcp list --json` and ordered using `~/.codex/config.toml` when available. Selection is passed only to the launched process through `-c mcp_servers.<name>...` overrides.

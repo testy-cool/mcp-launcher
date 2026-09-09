@@ -42,6 +42,7 @@ class LauncherError(RuntimeError):
 class Control:
     mode: str = "passthrough"
     refresh: bool = False
+    automatic: bool = False
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,7 @@ def managed_claude_names(names: list[str]) -> list[str]:
 
 def parse_wrapper_args(args: list[str]) -> tuple[Control, list[str]]:
     mode = "use_default"
+    automatic = True
     refresh = False
     passthrough: list[str] = []
     controls = {
@@ -118,14 +120,16 @@ def parse_wrapper_args(args: list[str]) -> tuple[Control, list[str]]:
             passthrough.append(arg)
         elif parsing_controls and arg in controls:
             mode = controls[arg]
+            automatic = False
         elif parsing_controls and arg == "--mcp-refresh":
             refresh = True
+            automatic = False
             if mode == "use_default":
                 mode = "prompt"
         else:
             passthrough.append(arg)
 
-    return Control(mode=mode, refresh=refresh), passthrough
+    return Control(mode=mode, refresh=refresh, automatic=automatic), passthrough
 
 
 def codex_override_args(
@@ -1202,7 +1206,7 @@ def show_help() -> None:
   --mcp-all       enable every discovered MCP without opening the picker
   --mcp-none      disable every discovered MCP without opening the picker
   --mcp-last      reuse the folder/default selection without opening the picker
-  --mcp-default   set the selection used for new folders, then exit
+  --mcp-default   set the default for every plain launch, then exit
   --mcp-use-default
                    launch with the saved default without opening the picker;
                    an unset default means all MCPs disabled
@@ -1219,6 +1223,15 @@ For automation, MCP_LAUNCHER_SELECT overrides the selection and accepts all, non
 comma-separated names.
 """
     )
+
+
+def report_missing_default(state: dict, tool: str) -> None:
+    if not isinstance(state.get("defaults", {}).get(tool), list):
+        print(
+            f"mcp-launcher: no {tool} MCP default is configured; "
+            f"run {tool} --mcp-default to choose MCPs. Launching with none.",
+            file=sys.stderr,
+        )
 
 
 def report_selection(tool: str, ordered: list[str], selected: set[str]) -> None:
@@ -1282,8 +1295,11 @@ def run_claude(control: Control, passthrough: list[str], state: dict) -> None:
         report_selection("claude default", ordered, selected)
         return
     apply_claude_selection(home, inventory, ordered, selected)
-    remember_folder_selection(state, "claude", cwd_key, ordered, selected)
+    if not control.automatic or "MCP_LAUNCHER_SELECT" in os.environ:
+        remember_folder_selection(state, "claude", cwd_key, ordered, selected)
     save_state(state)
+    if control.mode == "use_default" and "MCP_LAUNCHER_SELECT" not in os.environ:
+        report_missing_default(state, "claude")
     report_selection("claude", ordered, selected)
     restore = restore_resume_permissions("claude", passthrough, cwd, home)
     restore_args = restore.args if restore else ()
@@ -1324,8 +1340,11 @@ def run_codex(control: Control, passthrough: list[str], state: dict) -> None:
         save_state(state)
         report_selection("codex default", ordered, selected)
         return
-    remember_folder_selection(state, "codex", cwd_key, ordered, selected)
+    if not control.automatic or "MCP_LAUNCHER_SELECT" in os.environ:
+        remember_folder_selection(state, "codex", cwd_key, ordered, selected)
     save_state(state)
+    if control.mode == "use_default" and "MCP_LAUNCHER_SELECT" not in os.environ:
+        report_missing_default(state, "codex")
     report_selection("codex", ordered, selected)
     overrides = codex_override_args(ordered, selected, inventory.standalone_transports)
     restore = restore_resume_permissions("codex", passthrough, cwd, home)

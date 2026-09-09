@@ -2,9 +2,11 @@
 
 ## Unreleased
 
-- Make MCP management opt-in with `--mcp-launcher`; plain `claude` and `codex`
-  invocations now skip MCP discovery, selection, and state updates while keeping
-  permission-preserving resume behavior.
+- Apply saved per-tool MCP defaults to plain Claude and Codex launches without
+  a picker, while preserving explicit folder choices for `--mcp-last`.
+- Show setup guidance when a default is unset; an intentionally empty default
+  disables all discovered MCPs without a hint.
+- Keep explicit picker and selection controls available to override defaults.
 
 ## 0.2.0 - 2026-08-04
 

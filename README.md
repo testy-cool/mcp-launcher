@@ -33,6 +33,18 @@ make install
 source ~/.zshrc
 ```
 
+Choose your default MCPs once for each client you use:
+
+```bash
+claude --mcp-default
+codex --mcp-default
+```
+
+These defaults apply to every plain launch. After updating, existing native or
+folder selections are not automatically imported as defaults. Until you set a
+default, plain launches disable all discovered MCPs and show a setup hint.
+Saving an empty default intentionally disables all MCPs without that hint.
+
 For Bash, install into `.bashrc` instead:
 
 ```bash
@@ -50,7 +62,7 @@ make dry-run
 
 ## Use
 
-Run either CLI normally, with no MCP discovery or picker:
+Run either CLI normally to apply its saved default without a picker:
 
 ```bash
 claude
@@ -78,7 +90,7 @@ codex --mcp-launcher
 claude --mcp-order       # set the preferred MCP order
 codex --mcp-order
 
-claude --mcp-default     # pick the default for new folders, then exit
+claude --mcp-default     # pick the default for every plain launch, then exit
 codex --mcp-default
 
 claude --mcp-use-default # launch with the saved default, without a picker
@@ -147,7 +159,7 @@ is not known until after the launcher has exited.
 
 ## How selection works
 
-- Plain `claude` and `codex` invocations apply the saved tool default, overriding remembered folder selections.
+- Plain `claude` and `codex` invocations apply the saved tool default without replacing remembered folder selections. Use `--mcp-last` to reuse a folder choice.
   Permission-preserving resume still applies when resuming a native session.
 - `--mcp-launcher` opts into the picker. Any explicit `--mcp-*` selection
   control overrides the automatic default without requiring the picker flag.
@@ -159,6 +171,16 @@ is not known until after the launcher has exited.
   metadata are never copied into launcher state. Resume metadata is read directly
   from the CLIs' native files at launch time.
 - Defaults, per-folder selections, and picker preferences live in `~/.config/mcp-launcher/state.json` with mode `0600`.
+
+To bypass the installed shell functions, including if MCP discovery fails:
+
+```bash
+command claude
+command codex
+```
+
+This starts the native CLI with its native settings, without launcher MCP
+selection or permission recovery. Native help/version commands also work this way.
 
 ## Update or uninstall
 
